@@ -1,6 +1,7 @@
 """SQLAlchemy engine, declarative base, and session dependency."""
 
 from collections.abc import Generator
+from importlib import import_module
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -19,6 +20,13 @@ connect_args = (
 )
 engine = create_engine(settings.database_url, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+def init_db() -> None:
+    """Create database tables that do not exist yet."""
+
+    import_module(".models", package=__package__)
+    Base.metadata.create_all(bind=engine)
 
 
 def get_db() -> Generator[Session, None, None]:
