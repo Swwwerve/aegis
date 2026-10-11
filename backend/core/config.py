@@ -3,6 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +13,7 @@ class Settings(BaseSettings):
     app_name: str = "Aegis"
     database_url: str = "sqlite:///./aegis.db"
     github_token: str | None = None
+    openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     workspace_root: Path = Path("workspaces")
 
     model_config = SettingsConfigDict(
