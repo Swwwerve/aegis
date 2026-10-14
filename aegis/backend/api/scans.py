@@ -1,9 +1,13 @@
 """Create scans and retrieve historical results for ingested repositories."""
 
+import asyncio
+import json
 from collections.abc import AsyncGenerator
+from contextlib import suppress
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,6 +27,64 @@ router = APIRouter()
 async def get_scanner() -> AsyncGenerator[VulnerabilityScanner, None]:
     async with OSVClient() as client, EPSSClient() as epss, KEVClient() as kev:
         yield VulnerabilityScanner(client, advisory_client=AdvisoryClient(epss, kev))
+
+
+@router.post("/stream")
+async def stream_scan(
+    request: ScanRequest,
+    db: Annotated[Session, Depends(get_db)],
+    scanner: Annotated[VulnerabilityScanner, Depends(get_scanner)],
+):
+    """Stream actual stage events, then the persisted ScanRead. Disconnect cancels work."""
+    if db.get(Repository, request.repository_id) is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    async def events():
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def progress(data):
+            await queue.put(("progress", data))
+
+        async def work():
+            try:
+                run = await scan_repository(db, request, scanner, progress=progress)
+                await queue.put(("result", scan_read(run).model_dump(mode="json")))
+            except (LookupError, ScanInputError) as exc:
+                await queue.put(("error", {"message": str(exc)}))
+            except Exception:  # noqa: BLE001 -- do not expose private provider/DB errors
+                await queue.put(
+                    (
+                        "error",
+                        {
+                            "message": "Scan could not finish. Check scan history before retrying."
+                        },
+                    )
+                )
+            finally:
+                await queue.put(("end", {}))
+
+        task = asyncio.create_task(work())
+        try:
+            while True:
+                try:
+                    event, data = await asyncio.wait_for(queue.get(), timeout=10)
+                except TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
+                yield f"event: {event}\ndata: {json.dumps(data)}\n\n"
+                if event == "end":
+                    break
+        finally:
+            if not task.done():
+                task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("", response_model=ScanRead, status_code=201)

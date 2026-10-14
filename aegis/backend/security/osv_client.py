@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from ..core.progress import Progress, emit
 from ..schemas.vulnerability import ScanDependency
 
 BASE_URL = "https://api.osv.dev/v1"
@@ -143,14 +144,17 @@ class OSVClient:
         }
 
     async def query_packages(
-        self, dependencies: list[ScanDependency]
+        self, dependencies: list[ScanDependency], *, progress: Progress | None = None
     ) -> list[OSVResult]:
         if len(dependencies) > 10000:
             raise OSVError("OSV query count exceeds 10000-package limit")
         results = [OSVResult() for _ in dependencies]
         ids: list[set[str]] = [set() for _ in dependencies]
         all_ids: set[str] = set()
-        for start in range(0, len(dependencies), self.batch_size):
+        completed = 0
+
+        async def query_batch(start):
+            nonlocal completed
             pending = [
                 (index, self._query(dependencies[index]))
                 for index in range(
@@ -210,18 +214,56 @@ class OSVClient:
             else:
                 for index, _ in pending:
                     results[index].errors.append("OSV pagination limit reached")
+            completed += min(self.batch_size, len(dependencies) - start)
+            await emit(
+                progress,
+                "advisories",
+                "running",
+                f"Queried {completed}/{len(dependencies)} package versions; found {len(all_ids)} unique advisory records.",
+                packages_queried=completed,
+                packages_total=len(dependencies),
+            )
+
+        await asyncio.gather(
+            *(
+                query_batch(start)
+                for start in range(0, len(dependencies), self.batch_size)
+            )
+        )
         unique = sorted(all_ids)
         if len(unique) > self.max_records:
             unique = unique[: self.max_records]
 
+        await emit(
+            progress,
+            "advisories",
+            "running",
+            f"Downloading {len(unique)} unique advisory records for validation.",
+            advisories_completed=0,
+            advisories_total=len(unique),
+        )
+        hydrated_count = 0
+
         async def hydrate(identifier):
+            nonlocal hydrated_count
+            error = None
             try:
                 record = await self._request("GET", "/vulns/" + identifier)
                 if record.get("id") != identifier:
                     raise OSVError("OSV advisory ID mismatch")
-                return identifier, record, None
             except OSVError as exc:
-                return identifier, None, str(exc)
+                record, error = None, str(exc)
+            hydrated_count += 1
+            if hydrated_count % 20 == 0 or hydrated_count == len(unique):
+                await emit(
+                    progress,
+                    "advisories",
+                    "running",
+                    f"Downloaded {hydrated_count}/{len(unique)} advisory records (including failed requests).",
+                    advisories_completed=hydrated_count,
+                    advisories_total=len(unique),
+                )
+            return identifier, record, error
 
         hydrated = {
             identifier: (record, error)

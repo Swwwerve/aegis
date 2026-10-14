@@ -43,6 +43,36 @@ uvicorn aegis.backend.main:app --reload
 
 Run tests with `pytest`.
 
+## Frontend: the connected repository workspace
+
+The `frontend/` directory now contains a React/TypeScript application with
+Tailwind CSS and official shadcn/ui components. It connects repository intake,
+inventory, optional sandbox/model analysis, vulnerability discovery, live
+enrichment, source usage, prioritization, and scan history. Progress comes from
+the backend's new `POST /scans/stream` endpoint, including intermediate inventory
+output and the final persisted result. Existing scan endpoints remain available.
+
+Build it once, then serve the application and API together:
+
+```powershell
+cd frontend
+npm ci
+npm run build
+cd ..
+.\.venv\Scripts\python.exe -m uvicorn aegis.backend.main:app --host 127.0.0.1 --port 8000
+```
+
+Open **http://127.0.0.1:8000**. For hot reload, run `npm run dev` in `frontend/`
+while the backend runs on port 8000; open **http://127.0.0.1:5173**. Vite proxies
+the same-origin API requests and streams. Restart an already running backend
+after applying these changes. See [frontend/README.md](frontend/README.md) for
+configuration, exact workflow behavior, automated tests and the live browser smoke.
+
+Choose a real example or submit a public GitHub URL. Existing repositories reuse
+their saved clones. Inspect each stage, open finding evidence, review coverage
+gaps, filter priorities, export JSON and reopen saved scans. New scans also retain
+their full repository inventory so history preserves the connected evidence.
+
 ## Step 5: live, model-assisted vulnerability prioritization
 
 `POST /scans` now enriches findings with CVSS base scores (v2/v3/v4 vectors),
@@ -208,7 +238,7 @@ References: [OSV API](https://google.github.io/osv.dev/api/),
 Analyze an existing clone without executing any repository code:
 
 ```powershell
-.\.venv\Scripts\python.exe -m aegis.backend.analysis.repo_analyzer workspaces/OWNER-NAME-CLONE_ID
+.\.venv\Scripts\python.exe -m aegis.backend.analysis.repo_analyzer workspaces/CLONE_ID
 ```
 
 Add `--model` to interpret README, CI, and manifest evidence using OpenAI
@@ -245,7 +275,7 @@ and transitive graphs can be evaluated in the offline polyglot sandbox:
 
 ```powershell
 docker build -f docker/Dockerfile.polyglot -t aegis-sandbox:polyglot .
-.\.venv\Scripts\python.exe -m aegis.backend.analysis.repo_analyzer workspaces/OWNER-NAME-CLONE_ID --resolve
+.\.venv\Scripts\python.exe -m aegis.backend.analysis.repo_analyzer workspaces/CLONE_ID --resolve
 ```
 
 Or request `{"use_model": false, "resolve_dependencies": true}` at the analysis
@@ -363,7 +393,7 @@ from pathlib import Path
 from aegis.backend.sandbox.docker_runner import create_sandbox
 
 async def main():
-    repo = Path("workspaces/OWNER-NAME-CLONE_ID")  # Repository.local_path from Step 1
+    repo = Path("workspaces/CLONE_ID")  # Repository.local_path from Step 1
     async with await create_sandbox(repo) as box:
         print((await box.exec("ls", "/workspace/repo")).stdout.decode())
         # Set OPENAI_API_KEY on the host to run the OpenAI agent; it is never
@@ -391,3 +421,57 @@ bounded writable tmpfs, CPU, memory and process limits, all Linux capabilities
 dropped, and no Docker socket or host secrets. The host process needs access to the
 Docker daemon. These restrictions limit untrusted code, but Docker is not a hardened
 multi tenant boundary; use a dedicated machine or VM for hostile repositories.
+
+### CVE context planning
+
+`context/context_planner.py` implements model-directed retrieval: the model chooses
+searches, symbols, line ranges, related tests, and the final snippet selection.
+`analysis/code_search.py` uses the `rg` executable on PATH and Tree-sitter grammars
+for Python, JavaScript, TypeScript/TSX, and Java. Install the project dependencies
+after updating; no repository code is executed by the retrieval tools.
+
+```python
+from aegis.backend.context.context_planner import plan_hybrid_context
+
+# report is the ScanReport from a saved scan, including Step 5 enrichment.
+packet = await plan_hybrid_context(clone_path, "CVE-2024-1234", report)
+print(packet.status, packet.missing_context)
+```
+
+The six tools are `search_code`, `read_file`, `find_symbol`, `find_related_tests`,
+`get_dependency_info` (Step 3), and `get_advisory` (saved Step 5 evidence). Reads use
+inclusive, one-based line ranges. The final packet contains selected, hashed
+snippets with file/line coordinates and relevance reasons, plus only the target
+CVE's advisory and package facts. Limits bound tool calls, retrieval output,
+planning time, and final context size. No full repository dump or tool transcript
+is sent to the remediation agent. Unsupported grammars and incomplete retrievals
+remain explicit; model selection is not a proof of perfect relevance/completeness.
+
+`await SandboxExecutor(workspace).remediate_with_context(clone_path, cve_id, report)`
+returns `(packet, agent_result)`. It verifies selected snippets against the live
+sandbox before passing the packet to the existing remediation agent. Partial,
+missing-key, unknown-CVE, failed, or stale context returns no agent result. A model
+call requires the configured `OPENAI_API_KEY`; offline tests inject a mock model.
+
+The hybrid path runs a separate OpenAI Agents SDK context investigator with only
+`search_code`, `read_file`, and `find_symbol`. It checks ambiguity and whether each
+snippet is necessary for choosing or validating the fix, investigates gaps, and
+returns specific missing-context questions. Both passes share retrieval limits
+and one planning deadline. Overlapping source ranges are merged; operator answers
+are retained only as selected verbatim ranges. The remediation prompt excludes
+retrieval logs, risk scores, progress metrics, and investigation commentary.
+`plan_context` remains available for draft-only retrieval.
+
+In the frontend, inspect a CVE finding and select **Investigate context** under
+**Fix context**. Live activity, selected snippets, unresolved questions, and context
+export appear there. Provide a **Missing context response** and select **Continue
+investigation** to run another bounded review with that clarification. Closing the
+finding or selecting **Stop investigation** cancels work. Each continuation is a
+fresh run; context packets can be exported but are not stored as additional scans.
+The streaming endpoint is `POST /remediation/context/stream` (also available under
+`/api`) with `scan_id`, `cve_id`, and optional `clarification` (up to 4,000 characters).
+
+Embeddings are not required for this version: exact API search, symbol parsing,
+and an independent model review provide source coordinates for every code snippet.
+Semantic retrieval can be added later if evaluated cases show lexical search is
+missing necessary evidence; similarity alone would not establish relevance.

@@ -15,6 +15,7 @@ from cvss.exceptions import CVSSError
 from pydantic import BaseModel, Field
 
 from ..core.config import settings
+from ..core.progress import Progress, emit
 from ..schemas.vulnerability import PriorityAssessment, ScanReport, VulnerabilityFinding
 from .epss_client import EPSSClient
 from .kev_client import KEVClient
@@ -161,11 +162,30 @@ class AdvisoryClient:
         self.model = model
 
     async def enrich(
-        self, report: ScanReport, root: Path | None = None, *, use_model=False
+        self,
+        report: ScanReport,
+        root: Path | None = None,
+        *,
+        use_model=False,
+        progress: Progress | None = None,
     ):
         if not report.vulnerabilities:
             report.prioritization_status = "completed"
+            await emit(progress, "enrichment", "skipped", "No findings to enrich.")
+            await emit(progress, "usage", "skipped", "No affected packages to inspect.")
+            await emit(
+                progress,
+                "ranking",
+                "skipped",
+                "No findings to rank; check scan coverage before interpreting this result.",
+            )
             return
+        await emit(
+            progress,
+            "enrichment",
+            "running",
+            "Collecting CVSS vectors, live FIRST EPSS, CISA KEV, and advisory evidence.",
+        )
         cves = sorted(
             {
                 cve
@@ -195,8 +215,6 @@ class AdvisoryClient:
                 report.warnings.append(
                     f"{label} enrichment unavailable ({type(result).__name__}); priority is provisional"
                 )
-        if root is not None:
-            await asyncio.to_thread(analyze_usage, root, report.vulnerabilities)
         for finding in report.vulnerabilities:
             finding.epss = []
             finding.epss_probability = None
@@ -246,6 +264,52 @@ class AdvisoryClient:
                 if metadata.get("kev_catalog_stale") == "true" and finding.kev is False:
                     finding.kev = None
                     finding.enrichment["kev_status"] = "stale"
+            if (
+                finding.cvss_score is None
+                or finding.epss_probability is None
+                or finding.kev is None
+                or finding.enrichment.get("epss_status") == "partial"
+            ):
+                report.prioritization_status = "partial"
+        await emit(
+            progress,
+            "enrichment",
+            report.prioritization_status,
+            f"CVSS available for {sum(f.cvss_score is not None for f in report.vulnerabilities)} of {len(report.vulnerabilities)} findings; {sum(f.kev is True for f in report.vulnerabilities)} CISA KEV matches. Feed dates and gaps are retained.",
+        )
+        await emit(
+            progress,
+            "usage",
+            "running",
+            "Inspecting imports and package call sites without executing repository code.",
+        )
+        if root is not None:
+            await asyncio.to_thread(analyze_usage, root, report.vulnerabilities)
+        usage_status = (
+            "unavailable"
+            if root is None
+            else "partial"
+            if any(f.usage.status != "analyzed" for f in report.vulnerabilities)
+            else "completed"
+        )
+        await emit(
+            progress,
+            "usage",
+            usage_status,
+            "Static inspection finished; attribution gaps are flagged. Runtime frequency and exploitability are not inferred.",
+        )
+        await emit(
+            progress,
+            "ranking",
+            "running",
+            "Computing evidence scores"
+            + (
+                " and requesting contextual model judgments."
+                if use_model
+                else ". Model assessment is off."
+            ),
+        )
+        for finding in report.vulnerabilities:
             finding.priority = assess_priority(finding)
             if finding.priority.missing_evidence:
                 report.prioritization_status = "partial"
@@ -259,6 +323,12 @@ class AdvisoryClient:
                 f.installed_version,
                 f.advisory_id,
             )
+        )
+        await emit(
+            progress,
+            "ranking",
+            report.prioritization_status,
+            "Findings ranked by priority; score components, model status, and missing evidence are retained.",
         )
 
     async def assess_with_model(self, report: ScanReport):

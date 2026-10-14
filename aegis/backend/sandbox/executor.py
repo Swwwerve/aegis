@@ -51,6 +51,62 @@ class SandboxExecutor:
         self.workspace = workspace
         self.max_output_bytes = max_output_bytes
 
+    async def remediate_with_context(
+        self,
+        repository_path,
+        cve_id,
+        scan_report,
+        *,
+        analysis=None,
+        model="gpt-5.4",
+        limits=None,
+        max_turns: int = 10,
+        investigator_model=None,
+        progress=None,
+        clarification="",
+    ):
+        """Plan focused evidence, then feed only that packet to the sandbox agent.
+
+        Partial context remains reviewable but cannot automatically trigger edits.
+        Existing run_agent callers remain unchanged.
+        """
+        from ..context.context_planner import plan_hybrid_context
+        from .policies import validate_repository_path
+
+        path = validate_repository_path(repository_path)
+        packet = await plan_hybrid_context(
+            path,
+            cve_id,
+            scan_report,
+            analysis=analysis,
+            model=model,
+            limits=limits,
+            investigator_model=investigator_model,
+            progress=progress,
+            clarification=clarification,
+        )
+        result = None
+        if packet.status == "completed":
+            import hashlib
+
+            for snippet in packet.snippets:
+                try:
+                    raw = await self.workspace.read_file(snippet.path)
+                    lines = raw.decode("utf-8-sig").splitlines(keepends=True)
+                    current = "".join(lines[snippet.start - 1 : snippet.end])
+                    if hashlib.sha256(current.encode()).hexdigest() != snippet.sha256:
+                        raise ValueError("Selected snippet changed")
+                except (ValueError, OSError):
+                    packet.status = "partial"
+                    packet.missing_context.append(
+                        f"Sandbox source differs from selected context: {snippet.path}"
+                    )
+                    return packet, None
+            result = await self.workspace.run_agent(
+                packet.remediation_prompt(), model=model, max_turns=max_turns
+            )
+        return packet, result
+
     async def execute(
         self, command: CommandPlan, *, timeout: float | None = None
     ) -> ExecutionResult:

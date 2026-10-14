@@ -1,0 +1,104 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: #fff;
+  --color-secondary: #f0f1f3;
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: #f4f5f7;
+  --color-muted-foreground: #626b79;
+  --color-accent: #f1f2f5;
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: #d44141;
+  --color-border: #e6e8ed;
+  --color-input: #e0e3e9;
+  --color-ring: #ed6c39;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+}
+:root {
+  --background: #f7f8fa;
+  --foreground: #202733;
+  --card: #ffffff;
+  --primary: #a84222;
+  --radius: 0.75rem;
+}
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    margin: 0;
+  }
+  button,
+  a,
+  input {
+    -webkit-tap-highlight-color: transparent;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  :focus-visible {
+    outline: 2px solid #e86c3e;
+    outline-offset: 3px;
+  }
+}
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .mono {
+    font-family: "Cascadia Code", Consolas, monospace;
+  }
+}
+.hero-grid {
+  background-image:
+    linear-gradient(#e5e7ed66 1px, transparent 1px),
+    linear-gradient(90deg, #e5e7ed66 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: linear-gradient(to right, transparent, black);
+}
+.rise-in {
+  animation: rise-in 0.45s ease-out both;
+}
+
+/* Quiet metadata remains readable on both the light canvas and dark sidebar. */
+.text-slate-400 {
+  color: #637083;
+}
+aside .text-slate-400,
+aside .text-slate-500 {
+  color: #95a3b7;
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

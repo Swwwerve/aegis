@@ -1,7 +1,3 @@
-
-
-
-
 """Repository validation, cloning, and metadata extraction."""
 
 import re
@@ -57,23 +53,41 @@ def clone_repository(url: AnyHttpUrl | str) -> RepositoryMetadata:
     canonical_url, owner, name = parse_github_url(url)
     root = Path(settings.workspace_root)
     root.mkdir(parents=True, exist_ok=True)
-    destination = root / f"{owner}-{name}-{uuid4().hex}"
+    # Keep the full collision-resistant ID, without repeating metadata in paths.
+    # Deep repositories can otherwise exceed Windows limits even after Git
+    # checkout succeeds; owner/name remain in RepositoryMetadata and the DB.
+    destination = root / uuid4().hex
 
     try:
         subprocess.run(
-            ["git", "clone", "--depth", "1", canonical_url, str(destination)],
+            # Git for Windows otherwise rejects deeply nested paths even when
+            # Python and Windows support long filenames. Scope this setting to
+            # the clone; never change the user's global Git configuration.
+            [
+                "git",
+                "-c",
+                "core.longpaths=true",
+                "clone",
+                "--depth",
+                "1",
+                canonical_url,
+                str(destination),
+            ],
             check=True,
             capture_output=True,
             text=True,
             timeout=300,
         )
-        branch = subprocess.run(
-            ["git", "-C", str(destination), "symbolic-ref", "--short", "HEAD"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        ).stdout.strip() or None
+        branch = (
+            subprocess.run(
+                ["git", "-C", str(destination), "symbolic-ref", "--short", "HEAD"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).stdout.strip()
+            or None
+        )
     except (OSError, subprocess.SubprocessError) as exc:
         raise RepositoryIntakeError("Repository could not be cloned.") from exc
 

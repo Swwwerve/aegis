@@ -96,7 +96,9 @@ def _inventory(
                             f"Inventory limited to {max_files} filesystem entries"
                         )
                         return sorted(files)
-                    if entry.is_symlink():
+                    if entry.is_symlink() or (
+                        hasattr(entry, "is_junction") and entry.is_junction()
+                    ):
                         report.warnings.append(
                             f"Skipped symlink: {Path(entry.path).relative_to(root).as_posix()}"
                         )
@@ -119,6 +121,56 @@ def _inventory(
                 f"Cannot inventory {directory.relative_to(root)}: {type(exc).__name__}"
             )
     return sorted(files)
+
+
+def inventory_repository_files(
+    repository_path: str | Path, *, max_files: int = 20000, max_depth: int = 20
+) -> tuple[list[Path], list[str]]:
+    """Reuse Step 3's bounded inventory without reading repository contents."""
+    root = Path(repository_path).resolve(strict=True)
+    if not root.is_dir() or max_files < 1 or max_depth < 0:
+        raise ValueError("Invalid repository or inventory limits")
+    report = RepositoryAnalysis()
+    return _inventory(root, report, max_files, max_depth), report.warnings
+
+
+def get_dependency_info(analysis: RepositoryAnalysis, package: str) -> dict:
+    """Return only matching Step 3 inventory entries and their project metadata."""
+    from packaging.utils import canonicalize_name
+
+    def matches(dependency):
+        if dependency.ecosystem == "Node" and (dependency.version or "").startswith(
+            "npm:"
+        ):
+            return dependency.version[4:].rsplit("@", 1)[0] == package
+        return (
+            canonicalize_name(dependency.name) == canonicalize_name(package)
+            if dependency.ecosystem == "Python"
+            else dependency.name == package
+        )
+
+    projects = []
+    for project in analysis.projects:
+        dependencies = [
+            d.model_dump(mode="json") for d in project.dependencies if matches(d)
+        ]
+        if dependencies:
+            projects.append(
+                {
+                    "root": project.root,
+                    "dependencies": dependencies,
+                    "manifests": project.manifests,
+                    "lockfiles": project.lockfiles,
+                    "package_managers": project.package_managers,
+                    "runtime_constraints": project.runtime_constraints,
+                    "test_commands": [
+                        c.model_dump(mode="json")
+                        for c in project.commands
+                        if c.kind == "test"
+                    ],
+                }
+            )
+    return {"package": package, "projects": projects, "found": bool(projects)}
 
 
 def analyze_repository(

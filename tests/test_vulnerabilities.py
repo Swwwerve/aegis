@@ -300,6 +300,97 @@ def test_client_paginates_each_package_and_hydrates_once():
     assert all(request.url.host == "api.osv.dev" for request in calls)
 
 
+def test_batches_overlap_with_bounded_requests_and_preserve_package_results():
+    async def exercise():
+        active = peak = 0
+        two_started = asyncio.Event()
+        events = []
+        hydrated = []
+
+        async def progress(event):
+            events.append(event)
+
+        async def respond(request):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            if active == 2:
+                two_started.set()
+            try:
+                # Sequential batches deadlock here; overlap must actually occur.
+                await asyncio.wait_for(two_started.wait(), timeout=1)
+                await asyncio.sleep(0)
+                if request.method == "POST":
+                    query = json.loads(request.content)["queries"][0]
+                    version = query["version"]
+                    if version == "1.0.0" and "page_token" not in query:
+                        row = {
+                            "vulns": [{"id": "GHSA-shared"}],
+                            "next_page_token": "next",
+                        }
+                    else:
+                        row = {"vulns": [{"id": "GHSA-" + version}]}
+                    return httpx.Response(200, json={"results": [row]})
+                identifier = request.url.path.rsplit("/", 1)[-1]
+                hydrated.append(identifier)
+                return httpx.Response(200, json=advisory(identifier))
+            finally:
+                active -= 1
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+            results = await OSVClient(http, batch_size=1, concurrency=2).query_packages(
+                [scanned(version=f"{i}.0.0") for i in range(1, 5)], progress=progress
+            )
+        assert peak == 2
+        assert all(result.complete for result in results)
+        assert [{r["id"] for r in result.records} for result in results] == [
+            {"GHSA-shared", "GHSA-1.0.0"},
+            {"GHSA-2.0.0"},
+            {"GHSA-3.0.0"},
+            {"GHSA-4.0.0"},
+        ]
+        assert len(hydrated) == len(set(hydrated)) == 5
+        assert [e["packages_queried"] for e in events if "packages_queried" in e] == [
+            1,
+            2,
+            3,
+            4,
+        ]
+        assert events[-1]["advisories_completed"] == events[-1]["advisories_total"] == 5
+
+    asyncio.run(exercise())
+
+
+def test_cancelling_concurrent_batches_cancels_inflight_requests():
+    async def exercise():
+        started = asyncio.Event()
+        active = 0
+
+        async def respond(request):
+            nonlocal active
+            active += 1
+            if active == 2:
+                started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                active -= 1
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+            task = asyncio.create_task(
+                OSVClient(http, batch_size=1, concurrency=2).query_packages(
+                    [scanned(version=f"{i}.0.0") for i in range(1, 5)]
+                )
+            )
+            await asyncio.wait_for(started.wait(), timeout=1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert active == 0
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize("first_status", [429, 503])
 def test_client_retries_transient_provider_errors(first_status):
     count = 0
@@ -444,7 +535,7 @@ def test_invalid_json_and_transport_errors_are_reported():
 
 def test_scanner_deadline_is_a_failed_report():
     class Slow:
-        async def query_packages(self, dependencies):
+        async def query_packages(self, dependencies, *, progress=None):
             await asyncio.sleep(0.02)
 
     report = asyncio.run(
@@ -495,7 +586,7 @@ class FakeOSV:
     def __init__(self, results):
         self.results = results
 
-    async def query_packages(self, dependencies):
+    async def query_packages(self, dependencies, *, progress=None):
         return self.results
 
 

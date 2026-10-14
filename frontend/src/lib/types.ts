@@ -1,0 +1,239 @@
+export interface Repository {
+  id: number;
+  url: string;
+  owner: string;
+  name: string;
+  default_branch: string | null;
+  created_at: string;
+}
+export interface Dependency {
+  name: string;
+  version: string | null;
+  ecosystem: string;
+  scope: string;
+  manifest: string;
+  resolved: boolean;
+}
+export interface Command {
+  kind: string;
+  argv: string[];
+  cwd: string;
+  source: string;
+  confidence: string;
+  origin: string;
+  reason: string;
+  requires_network: boolean;
+}
+export interface Analysis {
+  languages: Record<string, number>;
+  primary_language: string | null;
+  files_examined: number;
+  truncated: boolean;
+  projects: {
+    root: string;
+    languages: string[];
+    package_managers: string[];
+    manifests: string[];
+    lockfiles: string[];
+    dependencies: Dependency[];
+    commands: Command[];
+    warnings: string[];
+    runtime_constraints: Record<string, string>;
+    resolutions: {
+      ecosystem: string;
+      method: string;
+      status: string;
+      diagnostics: string[];
+    }[];
+  }[];
+  important_directories: { path: string; role: string; evidence: string }[];
+  ci_files: string[];
+  documentation: string[];
+  container_files: string[];
+  inference_status: string;
+  resolution_status: string;
+  summary: string | null;
+  warnings: string[];
+}
+export interface Finding {
+  package: string;
+  installed_version: string;
+  ecosystem: string;
+  advisory_id: string;
+  advisory_ids: string[];
+  cve: string | null;
+  cves: string[];
+  summary: string;
+  fixed_version: string | null;
+  fixed_versions: string[];
+  references: string[];
+  manifests: string[];
+  scopes: string[];
+  notes: string[];
+  cvss_score: number | null;
+  cvss_vector: string | null;
+  epss_probability: number | null;
+  epss: {
+    cve: string;
+    probability: number;
+    percentile: number;
+    date: string;
+    source: string;
+  }[];
+  kev: boolean | null;
+  kev_entries: Record<string, unknown>[];
+  enrichment: Record<string, string>;
+  advisory_evidence: {
+    advisory_id: string;
+    source: string;
+    published: string | null;
+    modified: string | null;
+    ranges: unknown[];
+    affected_functions: string[];
+  }[];
+  usage: {
+    status: string;
+    method: string;
+    static_call_count: number | null;
+    import_count: number | null;
+    runtime_call_count: number | null;
+    affected_function_call_count: number | null;
+    files_scanned: number;
+    sites: { path: string; line: number; symbol: string; kind: string }[];
+    limitations: string[];
+    truncated: boolean;
+  };
+  priority: {
+    score: number;
+    baseline_score: number;
+    level: string;
+    method: string;
+    components: Record<string, number>;
+    explanation: string[];
+    missing_evidence: string[];
+    model_status: string;
+    model_reason: string | null;
+    model_adjustment: number;
+    model_evidence_fields: string[];
+  } | null;
+}
+export interface Scan {
+  id: number;
+  repository_id: number;
+  status: string;
+  commit_sha: string | null;
+  created_at: string;
+  report: {
+    status: string;
+    vulnerabilities: Finding[];
+    dependencies: {
+      package: string;
+      installed_version: string;
+      ecosystem: string;
+      manifests: string[];
+      scopes: string[];
+      version_source: string;
+    }[];
+    unscanned_dependencies: {
+      package: string;
+      declared_version: string | null;
+      reason: string;
+      manifest: string;
+    }[];
+    packages_queried: number;
+    packages_completed: number;
+    advisory_records: number;
+    withdrawn_records: number;
+    warnings: string[];
+    errors: string[];
+    prioritization_status: string;
+    analysis_summary: string | null;
+    analysis_inference_status: string;
+    analysis_resolution_status: string;
+    scope: string;
+    repository_analysis?: Analysis | null;
+  } | null;
+}
+export interface ProgressEvent {
+  stage: string;
+  status: string;
+  message: string;
+  analysis?: Analysis;
+  scan_id?: number;
+  tool?: string;
+  tool_calls?: number;
+  retrieved_chars?: number;
+}
+export interface ContextPacket {
+  cve_id: string;
+  status: "completed" | "partial" | "unavailable" | "failed";
+  investigation_status:
+    "not_requested" | "completed" | "needs_context" | "failed";
+  snippets: {
+    snippet_id: string;
+    path: string;
+    start: number;
+    end: number;
+    content: string;
+    reason: string;
+    sha256: string;
+    truncated: boolean;
+  }[];
+  context_requests: { kind: string; question: string; reason: string }[];
+  resolved_ambiguities: string[];
+  missing_context: string[];
+  diagnostics: string[];
+  tool_calls: number;
+  retrieved_chars: number;
+  clarifications?: {
+    source: string;
+    content: string;
+    reason: string;
+    sha256: string;
+  }[];
+}
+export interface Activity extends ProgressEvent {
+  time: string;
+}
+export const stages = [
+  { id: "intake", title: "Repository", detail: "Validate and clone" },
+  { id: "inventory", title: "Understand", detail: "Languages & manifests" },
+  { id: "resolution", title: "Resolve", detail: "Optional sandbox" },
+  {
+    id: "interpretation",
+    title: "Interpret",
+    detail: "Architecture & commands",
+  },
+  { id: "advisories", title: "Discover", detail: "OSV vulnerabilities" },
+  { id: "enrichment", title: "Enrich", detail: "CVSS, EPSS & KEV" },
+  { id: "usage", title: "Trace usage", detail: "Static call sites" },
+  { id: "ranking", title: "Prioritize", detail: "Contextual risk" },
+  { id: "saving", title: "Save", detail: "Evidence & history" },
+];
+export const examples = [
+  {
+    name: "NodeGoat",
+    owner: "OWASP",
+    language: "Node.js",
+    url: "https://github.com/OWASP/NodeGoat",
+    description:
+      "An intentionally vulnerable application with an npm lockfile.",
+    color: "#5d9779",
+  },
+  {
+    name: "PyGoat",
+    owner: "adeyosemanputra",
+    language: "Python",
+    url: "https://github.com/adeyosemanputra/pygoat",
+    description: "A Django security learning project with Python dependencies.",
+    color: "#668dcc",
+  },
+  {
+    name: "WebGoat",
+    owner: "WebGoat",
+    language: "Java",
+    url: "https://github.com/WebGoat/WebGoat",
+    description: "A Maven application for learning application security.",
+    color: "#bb8560",
+  },
+];

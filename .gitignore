@@ -14,3 +14,7 @@ build/
 htmlcov/
 sandbox-smoke-results/
 workspaces/
+node_modules/
+frontend/playwright-report/
+frontend/test-results/
+*.tsbuildinfo

@@ -56,6 +56,25 @@ def test_submit_repository(client: TestClient) -> None:
     assert response.json()["default_branch"] == "main"
 
 
+def test_clone_enables_long_paths_without_global_configuration(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from aegis.backend.core.config import settings
+
+    monkeypatch.setattr(settings, "workspace_root", tmp_path)
+    calls = []
+
+    def run(argv, **options):
+        calls.append(argv)
+        return SimpleNamespace(stdout="main\n")
+
+    monkeypatch.setattr(repository_service.subprocess, "run", run)
+    metadata = repository_service.clone_repository("https://github.com/vulnerable-apps/juice-shop")
+    assert calls[0][:6] == ["git", "-c", "core.longpaths=true", "clone", "--depth", "1"]
+    assert metadata.owner == "vulnerable-apps" and metadata.default_branch == "main"
+    assert len(metadata.local_path.name) == 32
+    assert all("--global" not in command and "--system" not in command for command in calls)
+
+
 def test_reject_non_github_repository(client: TestClient) -> None:
     client = TestClient(app)
     response = client.post(
