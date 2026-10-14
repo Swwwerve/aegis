@@ -43,6 +43,101 @@ uvicorn aegis.backend.main:app --reload
 
 Run tests with `pytest`.
 
+## Step 4: live dependency vulnerability scanning
+
+Start the API and open `http://127.0.0.1:8000/docs`. Submit a repository through
+`POST /repositories`, or reuse its existing ID from `GET /repositories`.
+Then call `POST /scans`:
+
+```json
+{
+  "repository_id": 1,
+  "use_model": true,
+  "resolve_dependencies": false
+}
+```
+
+`use_model` enables Step 3's non-deterministic README/CI interpretation when an
+OpenAI key is available. Advisory discovery uses live OSV data and can change
+between scans. Vulnerability identities, affected status, and fix versions are
+grounded in advisory evidence. Models do not populate vulnerability fields or
+choose dependency versions; their separate repo interpretation is retained in
+`report.analysis_summary` with an inference status.
+No OSV API key or scanner binary is needed. OSV includes GitHub Advisory Database
+records, so a separate GitHub token/provider is unnecessary for these advisories.
+
+The response contains a persisted scan ID/status and `report.vulnerabilities`:
+
+```json
+{
+  "package": "urllib3",
+  "installed_version": "1.26.4",
+  "cve": "CVE-2023-45803",
+  "affected": true,
+  "fixed_version": "1.26.18"
+}
+```
+
+Each finding also preserves ecosystem, all OSV IDs/aliases/CVEs, reported fix
+versions, references, severity vectors, manifests, scopes, conditional markers,
+and version provenance. Advisories without a CVE use `cve: null` and retain their
+advisory ID. Unpatched advisories or incomparable version schemes use
+`fixed_version: null`; Git commit hashes and `last_affected` boundaries are never
+presented as patched releases. A suggested fix addresses that advisory only,
+not every vulnerability in the package, and may still require compatibility testing.
+
+The scanner maps Python to PyPI, Node to npm, and Java to Maven. It queries exact
+lock/resolved versions and exact manifest pins, including discovered transitive,
+development and optional dependencies. `installed_version` names that concrete
+version; a pin/lockfile does not prove the package is installed. `version_source`,
+markers and manifests explain the evidence. Constraints, BOM/catalog policy entries,
+unresolved ranges and local/git dependencies are not guessed as installed packages.
+Unresolved dependencies remain in `report.unscanned_dependencies`.
+
+Set `resolve_dependencies: true` to run Step 3's offline Docker resolution first.
+This requires `aegis-sandbox:polyglot` or a prepared image selected through
+`AEGIS_ANALYSIS_SANDBOX_IMAGE`. The host then performs OSV requests; repository
+code continues to run only inside network-disabled Docker. Only package identifiers
+and versions are sent to OSV. Model interpretation has Step 3's separate context rules.
+
+`GET /scans/{id}` returns a saved result. `GET /scans?repository_id=1` returns
+history, newest first (`limit` 1..100 and nonnegative `offset` are supported).
+The POST runs synchronously and returns 201 for the created scan resource;
+inspect its status even when the HTTP request succeeds. `completed` means all
+identified exact versions were queried without recorded coverage/provider gaps,
+`partial` retains available findings with unresolved coverage/errors, and `failed`
+means the scan could not produce a usable result. No result claims an exhaustive
+source-code audit, reachability analysis, or detection of undisclosed vulnerabilities.
+
+Scan history is stored in `scan_runs.result`; deduplicated findings are stored in
+the new `vulnerability_findings` table. Normalization merges transitive OSV aliases
+within each ecosystem/package/version, preserving separate versions and packages.
+Withdrawn advisories are ignored; related IDs are not treated as aliases. Startup
+creates the new table alongside existing tables without deleting the database or
+changing existing scan/repository columns. Rescans create new historical runs.
+
+OSV requests use bounded batches, per-package pagination, limited concurrent
+advisory hydration, timeouts/retries, response-size budgets, and explicit errors.
+A failed lookup or unavailable exact inventory is never presented as a clean scan.
+
+Run the offline regression suite and a live smoke test:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_vulnerabilities.py -q
+.\.venv\Scripts\python.exe -m scripts.smoke_live_scan
+```
+
+The live test uses disposable Git/SQLite fixtures, checks vulnerable Python/npm/Maven
+packages against OSV, verifies persistence/deduplication and the urllib3 example,
+and writes the full JSON report under ignored `sandbox-smoke-results/`. It does not
+change the application's registered repositories and does not make OpenAI calls.
+Live advisory data can change; offline tests use controlled OSV responses.
+
+References: [OSV API](https://google.github.io/osv.dev/api/),
+[batch pagination](https://google.github.io/osv.dev/post-v1-querybatch/),
+[OSV alias/range schema](https://ossf.github.io/osv-schema/),
+[OSV data sources](https://google.github.io/osv.dev/data/).
+
 ## Step 3: repository understanding
 
 Analyze an existing clone without executing any repository code:

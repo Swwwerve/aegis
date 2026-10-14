@@ -1,14 +1,12 @@
-
-
-
 """FastAPI application entry point."""
 
-from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from .api.repos import router as repositories_router
+from .api.scans import router as scans_router
 from .core.config import settings
 from .db.database import init_db
 
@@ -23,3 +21,4 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.include_router(repositories_router, prefix="/repositories", tags=["repositories"])
+app.include_router(scans_router, prefix="/scans", tags=["scans"])
