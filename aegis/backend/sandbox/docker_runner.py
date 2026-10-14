@@ -95,7 +95,26 @@ class SecureDockerSandboxClient(DockerSandboxClient):
             privileged=False,
             ipc_mode="none",
             init=True,
-            environment={"HOME": "/tmp", "PATH": "/usr/local/bin:/usr/bin:/bin"},
+            environment={
+                "HOME": "/workspace/.aegis-home",
+                "PATH": "/opt/java/openjdk/bin:/usr/share/maven/bin:/opt/gradle/bin:/usr/local/bin:/usr/bin:/bin",
+                "JAVA_HOME": "/opt/java/openjdk",
+                "GRADLE_USER_HOME": "/workspace/.aegis-cache/gradle",
+                "MAVEN_OPTS": "-Dmaven.repo.local=/workspace/.aegis-cache/maven -Xmx384m",
+                "JAVA_TOOL_OPTIONS": "-Xmx512m",
+                "PIP_NO_INDEX": "1", "UV_OFFLINE": "1", "NPM_CONFIG_OFFLINE": "true",
+                "NPM_CONFIG_CACHE": "/workspace/.aegis-cache/npm",
+                # Yarn 4 offline candidate filtering needs a distinct mirror path.
+                "YARN_CACHE_FOLDER": "/workspace/.aegis-cache/yarn-local",
+                "YARN_GLOBAL_FOLDER": "/workspace/.aegis-cache/yarn",
+                "YARN_ENABLE_GLOBAL_CACHE": "0",
+                "YARN_ENABLE_MIRROR": "1",
+                "YARN_ENABLE_NETWORK": "0",
+                "YARN_ENABLE_OFFLINE_MODE": "1",
+                "YARN_ENABLE_SCRIPTS": "0",
+                "BUN_INSTALL_CACHE_DIR": "/workspace/.aegis-cache/bun",
+                "XDG_CACHE_HOME": "/workspace/.aegis-cache",
+            },
             labels={"aegis.sandbox": "true", "aegis.session": str(session_id)},
         )
 
@@ -113,6 +132,9 @@ class SandboxWorkspace:
     async def __aenter__(self) -> Self:
         try:
             await self.session.__aenter__()
+            initialized = await self.exec("python", "-c", "import pathlib,shutil; home=pathlib.Path('/workspace/.aegis-home'); home.mkdir(exist_ok=True); source=pathlib.Path('/opt/aegis-cache'); target=pathlib.Path('/workspace/.aegis-cache'); shutil.copytree(source,target,dirs_exist_ok=True) if source.is_dir() else target.mkdir(exist_ok=True)")
+            if initialized.exit_code:
+                raise RuntimeError("Unable to initialize sandbox offline caches")
             if self._snapshot_source is not None:
                 await self.restore(self._snapshot_source)
             self._expiry_task = asyncio.create_task(self._expire())

@@ -21,6 +21,19 @@ class SandboxPolicy:
     max_file_bytes: int = 8 * 1024 * 1024
     max_snapshot_bytes: int = 300 * 1024 * 1024
 
+    @classmethod
+    def polyglot(cls) -> "SandboxPolicy":
+        """Java/Gradle need more heap and writable cache space than Python alone."""
+        return cls(
+            image=settings.analysis_sandbox_image,
+            memory_bytes=2 * 1024**3,
+            nano_cpus=2_000_000_000,
+            pids_limit=256,
+            workspace_bytes=1024**3,
+            command_timeout_seconds=180,
+            max_snapshot_bytes=1200 * 1024**2,
+        )
+
 
 def validate_repository_path(path: str | Path, root: str | Path | None = None) -> Path:
     """Only admit a Step 1 clone directly beneath the workspace root."""

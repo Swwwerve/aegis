@@ -1,0 +1,63 @@
+# Resolve and pin upstream toolchains; repository code never runs during this build.
+FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS node
+FROM maven:3.9-eclipse-temurin-21-jammy@sha256:7f8422bd81f19b9035007a75e2f82272b09af64db08848d7d4e93302466e8b6f AS maven
+FROM gradle:8-jdk21-jammy@sha256:c865ece0e3226706fea53595254cd6328bbb602b0d9e3986fad82df328ba02d8 AS gradle
+FROM oven/bun:1@sha256:ec06c3b6cea04192ae6770c434f668ca41d343ad19fa6472216c7b48be39c598 AS bun
+FROM python:3.12-slim-bookworm
+
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=maven /opt/java/openjdk /opt/java/openjdk
+COPY --from=maven /usr/share/maven /usr/share/maven
+COPY --from=gradle /opt/gradle /opt/gradle
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
+ENV JAVA_HOME=/opt/java/openjdk
+ENV PATH=/opt/java/openjdk/bin:/usr/share/maven/bin:/opt/gradle/bin:$PATH
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates bash ripgrep xxd libstdc++6 libz1 libfreetype6 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && npm install -g --ignore-scripts pnpm@10.11.0 @yarnpkg/cli-dist@4.9.2 \
+    && npm install -g --ignore-scripts --prefix /opt/yarn-classic yarn@1.22.22 \
+    && ln -s /opt/yarn-classic/lib/node_modules/yarn/bin/yarn.js /usr/local/bin/yarn1 \
+    && pip install --no-cache-dir pytest==8.4.2 bandit==1.8.6 build==1.2.2.post1 setuptools==80.9.0 wheel==0.45.1 packaging==25.0 \
+    && node --version && npm --version && pnpm --version && yarn --version && bun --version \
+    && java -version && mvn --version && gradle --version
+
+# Populate a baseline offline Maven cache using ONLY these checked-in fixtures.
+# Additional project artifacts can be supplied in a derived image at /opt/aegis-cache.
+COPY docker/cache-seed /opt/cache-seed
+RUN npm install --prefix /opt/cache-seed --ignore-scripts --no-audit --no-fund --cache=/opt/aegis-cache/npm \
+    && cd /opt/cache-seed \
+    && pnpm install --ignore-scripts --store-dir /opt/aegis-cache/pnpm \
+    && YARN_CACHE_FOLDER=/opt/aegis-cache/yarn yarn install --mode=skip-build \
+    && yarn1 install --ignore-scripts --cache-folder /opt/aegis-cache/yarn1 \
+    && BUN_INSTALL_CACHE_DIR=/opt/aegis-cache/bun bun install --ignore-scripts \
+    && mvn -B -f /opt/cache-seed/pom.xml -Dmaven.repo.local=/opt/aegis-cache/maven package \
+    && mvn -B -f /opt/cache-seed/pom.xml -Dmaven.repo.local=/opt/aegis-cache/maven org.apache.maven.plugins:maven-help-plugin:3.5.1:effective-pom \
+    && mvn -B -f /opt/cache-seed/pom.xml -Dmaven.repo.local=/opt/aegis-cache/maven org.apache.maven.plugins:maven-dependency-plugin:3.8.1:tree \
+    && rm -rf /opt/cache-seed
+
+# pnpm keeps registry metadata outside its content-addressed store.
+RUN cp -a /root/.cache/pnpm/. /opt/aegis-cache/pnpm/
+RUN mkdir -p /opt/aegis-cache/yarn && cp -a /root/.yarn/berry/. /opt/aegis-cache/yarn/
+# Migrated lockfiles can skip registry metadata fetches for transitive packages.
+# Seed that metadata explicitly from a fresh, trusted project.
+RUN mkdir -p /opt/yarn-metadata \
+    && echo '{"name":"aegis-yarn-metadata","private":true,"dependencies":{"is-number":"6.0.0"}}' > /opt/yarn-metadata/package.json \
+    && YARN_GLOBAL_FOLDER=/opt/aegis-cache/yarn yarn --cwd /opt/yarn-metadata install --mode=skip-build \
+    && rm -rf /opt/yarn-metadata
+RUN mkdir -p /opt/bun-metadata \
+    && echo '{"name":"aegis-bun-metadata","private":true,"dependencies":{"is-odd":"3.0.1"}}' > /opt/bun-metadata/package.json \
+    && cd /opt/bun-metadata \
+    && BUN_INSTALL_CACHE_DIR=/opt/aegis-cache/bun bun install --ignore-scripts \
+    && rm -rf /opt/bun-metadata
+
+RUN groupadd --gid 10001 aegis \
+    && useradd --uid 10001 --gid 10001 --create-home --shell /bin/sh aegis \
+    && mkdir -p /workspace \
+    && chown aegis:aegis /workspace
+USER 10001:10001
+WORKDIR /workspace

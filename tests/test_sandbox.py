@@ -27,6 +27,8 @@ from aegis.backend.sandbox.policies import (
     repository_file,
     validate_repository_path,
 )
+from aegis.backend.sandbox.executor import SandboxExecutor
+from aegis.backend.schemas.repository import CommandPlan
 
 
 class MockModel(Model):
@@ -135,6 +137,16 @@ def test_real_docker_session(tmp_path: Path) -> None:
             assert await box.read_file("hello.txt") == b"after\n"
             checks = await box.run_checks({"pytest": ["python", "-m", "pytest", "--version"]}, tmp_path / "checks")
             assert checks == {"pytest": 0}
+            await box.exec("mkdir", "-p", "/workspace/repo/component/tests")
+            await box.write_file("component/tests/test_example.py", b"def test_example():\n    assert 2 + 3 == 5\n")
+            executor = SandboxExecutor(box)
+            verified = await executor.execute(CommandPlan(kind="test", argv=["python", "-m", "pytest", "-q"], cwd="component", source="component/tests/test_example.py"))
+            assert verified.status == "passed" and "1 passed" in verified.stdout
+            missing = await executor.execute(CommandPlan(kind="test", argv=["aegis-nonexistent-tool"], source="README.md"))
+            assert missing.status == "skipped"
+            await box.exec("ln", "-s", "/tmp", "/workspace/repo/escape")
+            escaped = await executor.execute(CommandPlan(kind="test", argv=["python", "--version"], cwd="escape", source="README.md"))
+            assert escaped.status == "failed" and escaped.exit_code == 125
             model = MockModel()
             agent_result = await box.run_agent("Inspect the repository", model=model)
             assert agent_result.final_output == "mock agent completed"

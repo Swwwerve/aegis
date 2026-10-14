@@ -64,3 +64,40 @@ def test_reject_non_github_repository(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_analyze_registered_repository(client: TestClient, tmp_path: Path, monkeypatch) -> None:
+    from aegis.backend.core.config import settings
+    root = tmp_path / "workspaces"
+    clone = root / "example"
+    (clone / ".git").mkdir(parents=True)
+    (clone / "package.json").write_text('{"scripts":{"test":"node --test"}}')
+    monkeypatch.setattr(settings, "workspace_root", root)
+
+    def fake_clone(url):
+        canonical, owner, name = repository_service.parse_github_url(url)
+        return repository_service.RepositoryMetadata(canonical, owner, name, "main", clone)
+
+    monkeypatch.setattr(repository_service, "clone_repository", fake_clone)
+    registered = client.post("/repositories", json={"url": "https://github.com/octo/project"}).json()
+    result = client.post(f"/repositories/{registered['id']}/analysis", json={"use_model": False})
+    assert result.status_code == 200
+    assert result.json()["projects"][0]["package_managers"] == ["npm"]
+    assert result.json()["inference_status"] == "not_requested"
+    from aegis.backend.sandbox import executor
+    from aegis.backend.schemas.repository import DependencyResolution
+
+    async def fake_resolution(path, report):
+        assert path == clone
+        report.projects[0].resolutions = [DependencyResolution(ecosystem='Node',method='npm-installed-tree',status='completed')]
+        report.resolution_status = 'completed'
+        return report
+
+    monkeypatch.setattr(executor,'resolve_repository_analysis',fake_resolution)
+    resolved = client.post(f"/repositories/{registered['id']}/analysis",json={'use_model':False,'resolve_dependencies':True})
+    assert resolved.status_code == 200
+    assert resolved.json()['resolution_status'] == 'completed'
+    assert resolved.json()['projects'][0]['resolutions'][0]['method'] == 'npm-installed-tree'
+    assert client.post("/repositories/999/analysis", json={"use_model": False}).status_code == 404
+    monkeypatch.setattr(settings, "workspace_root", tmp_path)
+    assert client.post(f"/repositories/{registered['id']}/analysis", json={"use_model": False}).status_code == 422
