@@ -18,6 +18,7 @@ from test_context import CVE, PlanningModel, ReviewModel, report, repository  # 
 
 from aegis.backend.agents.remediation_agent import make_remediation_agent
 from aegis.backend.context.context_planner import plan_hybrid_context
+from aegis.backend.context.remediation_evidence import RemediationEvidenceTools
 from aegis.backend.context.remediation_skills import RemediationSkills
 from aegis.backend.services.remediation_service import plan_remediation
 
@@ -150,6 +151,10 @@ def test_only_requested_eligible_skill_is_loaded_and_plan_changes_nothing(reposi
     plan = asyncio.run(plan_remediation(packet, model=model, progress=progress))
     assert plan.status == "ready", plan.model_dump()
     assert plan.skills_used == ["python-remediation"] and model.tools == ["load_skill"]
+    assert plan.source_references and plan.advisory_references
+    assert plan.skill_references[0].path.endswith(
+        "backend/skills/python-remediation/SKILL.md"
+    )
     assert "Maven parent" not in json.dumps(model.seed)
     assert [event["skill"] for event in events if "skill" in event] == [
         "python-remediation"
@@ -160,6 +165,15 @@ def test_only_requested_eligible_skill_is_loaded_and_plan_changes_nothing(reposi
         if p.is_file()
     }
     assert before == after
+
+
+def test_agent_can_use_only_packet_scoped_read_only_tools(repository):
+    packet = packet_for(repository)
+    tools = RemediationEvidenceTools(packet).tools()
+    agent = make_remediation_agent(evidence_tools=tools)
+    assert {
+        tool.name for tool in agent.tools
+    } == {"search_code", "read_file", "get_dependency_info", "get_advisory"}
 
 
 @pytest.mark.parametrize(

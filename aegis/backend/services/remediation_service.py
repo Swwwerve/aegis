@@ -1,6 +1,7 @@
 """Skill-guided remediation planning without repository execution."""
 
 import asyncio
+import hashlib
 import json
 from pathlib import PurePosixPath
 
@@ -13,7 +14,13 @@ from ..context.context_planner import plan_hybrid_context
 from ..context.remediation_skills import RemediationSkills
 from ..core.config import settings
 from ..core.progress import emit
-from ..schemas.remediation import RemediationPlan, incomplete_plan
+from ..schemas.remediation import (
+    AdvisoryReference,
+    EvidenceReference,
+    RemediationPlan,
+    SkillReference,
+    incomplete_plan,
+)
 
 
 def validate_plan(plan, packet, skills):
@@ -72,6 +79,64 @@ def validate_plan(plan, packet, skills):
             gaps.append(
                 "A proposed upgrade is not a confirmed fixed version in the packet"
             )
+    plan.affected_files = list(
+        dict.fromkeys(
+            [
+                *plan.affected_files,
+                *(path for step in plan.steps for path in step.paths),
+            ]
+        )
+    )[:20]
+    # References are attached by the service, not trusted from model-generated
+    # paths or hashes. This keeps the persisted plan auditable and packet-scoped.
+    plan.source_references = [
+        EvidenceReference(
+            evidence_id=snippet.snippet_id,
+            path=snippet.path,
+            sha256=snippet.sha256,
+        )
+        for snippet in packet.snippets
+        if snippet.path in plan.affected_files
+        or any(snippet.snippet_id in entry.evidence_ids for entry in plan.steps)
+        or any(snippet.snippet_id in entry.evidence_ids for entry in plan.validation)
+    ]
+    plan.advisory_references = [
+        AdvisoryReference(
+            advisory_id=advisory_id,
+            source=evidence.get("source", ""),
+        )
+        for finding in findings
+        for evidence in finding.get("advisory_evidence", [])
+        for advisory_id in dict.fromkeys(
+            [
+                evidence.get("advisory_id", ""),
+                finding.get("advisory_id", ""),
+                *finding.get("advisory_ids", []),
+            ]
+        )
+        if advisory_id and evidence.get("source")
+    ]
+    plan.advisory_references = list(
+        {
+            (item.advisory_id, item.source): item
+            for item in plan.advisory_references
+        }.values()
+    )
+    plan.skill_references = [
+        SkillReference(
+            name=name,
+            path=f"backend/skills/{name}/SKILL.md",
+            sha256=hashlib.sha256(skills.loaded[name].encode()).hexdigest(),
+        )
+        for name in plan.skills_used
+        if name in skills.loaded
+    ]
+    if not plan.source_references:
+        gaps.append("Plan does not reference a supplied source or dependency snippet")
+    if not plan.advisory_references:
+        gaps.append("Plan does not reference supplied advisory evidence")
+    if not plan.skill_references:
+        gaps.append("Plan does not reference loaded Skill instructions")
     if plan.status == "ready" and (not plan.steps or not plan.validation):
         gaps.append("A ready plan requires concrete steps and proposed validation")
     if gaps:

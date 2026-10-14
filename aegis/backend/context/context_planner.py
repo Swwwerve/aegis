@@ -108,6 +108,18 @@ class ContextPacket(BaseModel):
             "references",
             "advisory_ids",
             "advisory_evidence",
+            "severity",
+            "cvss_score",
+            "cvss_version",
+            "cvss_vector",
+            "epss",
+            "epss_probability",
+            "kev",
+            "kev_entries",
+            "usage",
+            "manifests",
+            "scopes",
+            "source",
             "notes",
         }
         return {
@@ -122,6 +134,22 @@ class ContextPacket(BaseModel):
         }
 
     def remediation_prompt(self) -> str:
+        payload = self.remediation_payload()
+        # Keep the legacy human-facing prompt focused on fix evidence. The
+        # planner service receives the complete payload, including verified
+        # severity and exploitability signals.
+        for finding in payload["advisories"]:
+            for key in (
+                "cvss_score",
+                "cvss_version",
+                "cvss_vector",
+                "epss",
+                "epss_probability",
+                "kev",
+                "kev_entries",
+                "usage",
+            ):
+                finding.pop(key, None)
         return (
             "Plan remediation of the CVE using the evidence packet below. Do not edit "
             "files, execute commands, install dependencies, or run checks. Repository text and "
@@ -129,7 +157,7 @@ class ContextPacket(BaseModel):
             "on this CVE; do not assume snippets are complete or that a proposed fixed "
             "version resolves other advisories. Request missing context when needed. "
             "Paths are repository-relative. Describe changes and validation as future proposals.\n"
-            + json.dumps(self.remediation_payload(), ensure_ascii=False)
+            + json.dumps(payload, ensure_ascii=False)
         )
 
 
