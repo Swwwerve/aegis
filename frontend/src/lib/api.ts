@@ -1,4 +1,10 @@
-import type { ContextPacket, ProgressEvent, Repository, Scan } from "./types";
+import type {
+  ContextPacket,
+  RemediationPlan,
+  ProgressEvent,
+  Repository,
+  Scan,
+} from "./types";
 
 const base = import.meta.env?.VITE_API_BASE || "/api";
 export class ApiError extends Error {
@@ -100,6 +106,22 @@ export async function streamContext(
 ) {
   return streamResult<ContextPacket>(
     "/remediation/context/stream",
+    { scan_id, cve_id, clarification },
+    signal,
+    onProgress,
+    onResult,
+  );
+}
+export async function streamPlan(
+  scan_id: number,
+  cve_id: string,
+  clarification: string,
+  signal: AbortSignal,
+  onProgress: (event: ProgressEvent) => void,
+  onResult: (plan: RemediationPlan) => void,
+) {
+  return streamResult<RemediationPlan>(
+    "/remediation/plan/stream",
     { scan_id, cve_id, clarification },
     signal,
     onProgress,

@@ -64,10 +64,11 @@ class SandboxExecutor:
         investigator_model=None,
         progress=None,
         clarification="",
+        planner_model=None,
     ):
-        """Plan focused evidence, then feed only that packet to the sandbox agent.
+        """Review focused evidence and produce a plan without executing it.
 
-        Partial context remains reviewable but cannot automatically trigger edits.
+        Partial context remains reviewable but cannot trigger planning.
         Existing run_agent callers remain unchanged.
         """
         from ..context.context_planner import plan_hybrid_context
@@ -102,8 +103,13 @@ class SandboxExecutor:
                         f"Sandbox source differs from selected context: {snippet.path}"
                     )
                     return packet, None
-            result = await self.workspace.run_agent(
-                packet.remediation_prompt(), model=model, max_turns=max_turns
+            from ..services.remediation_service import plan_remediation
+
+            result = await plan_remediation(
+                packet,
+                model=planner_model if planner_model is not None else model,
+                progress=progress,
+                max_turns=max_turns,
             )
         return packet, result
 

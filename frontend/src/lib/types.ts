@@ -192,6 +192,33 @@ export interface ContextPacket {
     sha256: string;
   }[];
 }
+
+export interface RemediationPlan {
+  cve_id: string;
+  status: "ready" | "needs_context" | "unavailable" | "failed";
+  summary: string;
+  skills_used: string[];
+  steps: {
+    kind: string;
+    description: string;
+    paths: string[];
+    evidence_ids: string[];
+  }[];
+  version_changes: {
+    package: string;
+    ecosystem: string;
+    installed_version: string;
+    proposed_version: string;
+  }[];
+  validation: {
+    description: string;
+    argv: string[];
+    cwd: string;
+    evidence_ids: string[];
+  }[];
+  risks: string[];
+  missing_context: string[];
+}
 export interface Activity extends ProgressEvent {
   time: string;
 }

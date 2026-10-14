@@ -11,7 +11,7 @@ from typing import Any, Self
 from agents import RunConfig, Runner
 from agents.models.interface import Model
 from agents.models.openai_responses import OpenAIResponsesModel
-from agents.sandbox import Manifest, SandboxRunConfig
+from agents.sandbox import Manifest
 from agents.sandbox.entries.artifacts import LocalDir
 from agents.sandbox.sandboxes.docker import (
     DockerSandboxClient,
@@ -190,9 +190,7 @@ class SandboxWorkspace:
             return await asyncio.wait_for(
                 Runner.run(
                     agent, prompt, max_turns=max_turns, hooks=hooks,
-                    run_config=RunConfig(
-                        sandbox=SandboxRunConfig(session=self.session), tracing_disabled=True,
-                    ),
+                    run_config=RunConfig(tracing_disabled=True),
                 ),
                 timeout=self.policy.agent_timeout_seconds,
             )

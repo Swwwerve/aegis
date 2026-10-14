@@ -347,6 +347,81 @@ test("context provider failures leave usable finding details and a retry", async
     dialog.getByText("Package usage evidence", { exact: true }),
   ).toBeVisible();
 });
+
+test("skill-guided remediation displays a proposal without an execution control", async ({
+  page,
+}) => {
+  await mock(page);
+  await page.route("**/api/remediation/context/stream", (route) =>
+    route.fulfill({
+      contentType: "text/event-stream",
+      body: 'event: result\ndata: {"cve_id":"CVE-2023-45803","status":"completed","investigation_status":"completed","snippets":[],"context_requests":[],"resolved_ambiguities":[],"missing_context":[],"diagnostics":[],"tool_calls":4,"retrieved_chars":800}\n\n',
+    }),
+  );
+  await page.route("**/api/remediation/plan/stream", (route) => {
+    expect(route.request().postDataJSON().scan_id).toBe(19);
+    const plan = {
+      cve_id: "CVE-2023-45803",
+      status: "ready",
+      summary: "Propose upgrading the affected dependency",
+      skills_used: ["python-remediation"],
+      steps: [
+        {
+          kind: "dependency",
+          description: "Propose updating the owning dependency pin",
+          paths: ["requirements.txt"],
+          evidence_ids: ["pin"],
+        },
+      ],
+      version_changes: [],
+      validation: [
+        {
+          description: "Propose running the existing regression suite",
+          argv: ["python", "-m", "pytest"],
+          cwd: ".",
+          evidence_ids: ["test"],
+        },
+      ],
+      risks: ["Check interpreter compatibility before implementation"],
+      missing_context: [],
+    };
+    return route.fulfill({
+      contentType: "text/event-stream",
+      body:
+        'event: progress\ndata: {"stage":"remediation_skills","status":"running","message":"Loaded python-remediation for the remediation plan."}\n\n' +
+        `event: result\ndata: ${JSON.stringify(plan)}\n\n`,
+    });
+  });
+  await start(page);
+  await page
+    .getByRole("button", { name: "Inspect urllib3 CVE-2023-45803" })
+    .click();
+  const dialog = page.getByRole("dialog");
+  await dialog
+    .getByRole("button", { name: "Investigate context", exact: true })
+    .click();
+  await dialog.getByRole("button", { name: "Create remediation plan" }).click();
+  await expect(
+    dialog.getByRole("heading", { name: "Proposed remediation plan" }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText("Skills used: python-remediation", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText(
+      "Changes and checks below are proposals for review. No files were changed or commands executed.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: /Execute|Apply fix|Run checks/ }),
+  ).toHaveCount(0);
+  const download = page.waitForEvent("download");
+  await dialog.getByRole("button", { name: "Export plan" }).click();
+  expect((await download).suggestedFilename()).toBe(
+    "aegis-plan-19-CVE-2023-45803.json",
+  );
+});
 test("offline status, URL validation and responsive empty state", async ({
   page,
 }) => {

@@ -1,4 +1,4 @@
-"""Run one real OpenAI SandboxAgent against a tiny, disposable Git repository."""
+"""Verify that the legacy sandbox agent entry point returns a plan without edits."""
 
 import asyncio
 import json
@@ -60,14 +60,14 @@ async def main() -> None:
             agent_error = None
             try:
                 response = await box.run_agent(
-                    "In /workspace/repo, fix calculator.py so the existing test passes. "
-                    "Use the sandbox shell to inspect and run the test. Use apply_patch to edit "
-                    "repo/calculator.py. Do not edit test_calculator.py. Keep the change minimal.",
+                    "Create a plan only. No reviewed CVE evidence is available. "
+                    "Request the missing evidence instead of guessing or executing anything.",
                     max_turns=20,
                     hooks=TraceHooks(output / "agent-trace.jsonl"),
                 )
             except (AgentsException, APIError, TimeoutError) as exc:
                 agent_error = f"{type(exc).__name__}: {exc}"
+            unchanged = await box.read_file("calculator.py") == b"def add(a, b):\n    return a - b\n"
             checks = await box.run_checks(
                 {"pytest": ["python", "-m", "pytest", "-q", "/workspace/repo/test_calculator.py"]},
                 output / "checks",
@@ -82,9 +82,9 @@ async def main() -> None:
             "output_tokens": sum(item.usage.output_tokens for item in response.raw_responses) if response else None,
         }
         (output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-        if checks["pytest"] != 0 or agent_error:
+        if checks["pytest"] == 0 or not unchanged or agent_error:
             raise SystemExit(f"Live sandbox test failed; inspect {output.resolve()}: {agent_error}")
-        print(f"Live sandbox test passed. Results: {output.resolve()}")
+        print(f"Plan-only sandbox test passed; baseline bug remains unchanged. Results: {output.resolve()}")
         print(f"Tokens: {summary['input_tokens']} input, {summary['output_tokens']} output")
 
 

@@ -398,7 +398,8 @@ async def main():
         print((await box.exec("ls", "/workspace/repo")).stdout.decode())
         # Set OPENAI_API_KEY on the host to run the OpenAI agent; it is never
         # forwarded into the container.
-        # result = await box.run_agent("Fix the reported issue and run tests")
+        # Remediation planning uses plan_remediation(reviewed_packet).
+        # The planner has no execution or file-editing tools.
         print(await box.run_checks({"tests": ["python", "-m", "pytest", "-q"]}, "results/checks"))
         await box.export_results("results/export")
 
@@ -448,8 +449,8 @@ is sent to the remediation agent. Unsupported grammars and incomplete retrievals
 remain explicit; model selection is not a proof of perfect relevance/completeness.
 
 `await SandboxExecutor(workspace).remediate_with_context(clone_path, cve_id, report)`
-returns `(packet, agent_result)`. It verifies selected snippets against the live
-sandbox before passing the packet to the existing remediation agent. Partial,
+returns `(packet, plan)`. It verifies selected snippets against the live
+sandbox before producing a skill-guided `RemediationPlan`. Partial,
 missing-key, unknown-CVE, failed, or stale context returns no agent result. A model
 call requires the configured `OPENAI_API_KEY`; offline tests inject a mock model.
 
@@ -475,3 +476,32 @@ Embeddings are not required for this version: exact API search, symbol parsing,
 and an independent model review provide source coordinates for every code snippet.
 Semantic retrieval can be added later if evaluated cases show lexical search is
 missing necessary evidence; similarity alone would not establish relevance.
+
+### Skill-guided remediation plans
+
+The remediation agent is a regular OpenAI SDK `Agent`, with **only** a trusted
+`load_skill` tool. It has no shell, filesystem, sandbox or execution capabilities.
+The planner produces proposed changes, confirmed version targets, evidence IDs,
+compatibility risks and future validation checks; it never edits files or runs
+commands. Existing sandbox execution/resolution APIs remain separate operations.
+
+Skills live under `aegis/backend/skills/`: vulnerability triage, Python, npm,
+Maven, Gradle, regression testing, security review, injection and deserialization.
+Only descriptions of evidence-eligible skills enter the initial prompt. The agent
+loads the instruction body for each necessary skill on demand; irrelevant skill
+loads are rejected and actual loaded skills are checked against the final plan.
+An unconfirmed version, unseen file, invented evidence ID or unsupported validation
+command marks the proposal as needing context rather than ready for review.
+
+```python
+from aegis.backend.services.remediation_service import plan_remediation
+plan = await plan_remediation(reviewed_packet)
+```
+
+After context investigation, **Create remediation plan** in the finding dialog
+streams skill-selection progress and displays the proposed steps and validation.
+**Export plan** downloads the proposal. `POST /remediation/plan/stream` accepts the
+same scan/CVE/clarification fields as the context endpoint, re-investigates current
+source context, and generates a plan. `SandboxExecutor.remediate_with_context` is
+a compatibility entry point returning `(packet, plan)`; it performs source
+freshness reads before planning but does not invoke execution capabilities.

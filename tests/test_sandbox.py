@@ -42,7 +42,7 @@ class MockModel(Model):
         return ModelResponse(
             output=[ResponseOutputMessage(
                 id="mock-message", role="assistant", status="completed", type="message",
-                content=[ResponseOutputText(annotations=[], text="mock agent completed", type="output_text")],
+                content=[ResponseOutputText(annotations=[], text='{"cve_id":"CVE-2024-1234","status":"needs_context","summary":"Planning requires reviewed evidence","skills_used":[],"steps":[],"version_changes":[],"validation":[],"risks":[],"missing_context":["Provide reviewed context"]}', type="output_text")],
             )],
             usage=Usage(), response_id=None,
         )
@@ -149,8 +149,8 @@ def test_real_docker_session(tmp_path: Path) -> None:
             assert escaped.status == "failed" and escaped.exit_code == 125
             model = MockModel()
             agent_result = await box.run_agent("Inspect the repository", model=model)
-            assert agent_result.final_output == "mock agent completed"
-            assert "exec_command" in model.tool_names and "apply_patch" in model.tool_names
+            assert agent_result.final_output.status == "needs_context"
+            assert model.tool_names == set()
             snapshot = await box.snapshot(tmp_path / "snapshot.tar")
             export = await box.export_results(tmp_path / "export")
             assert b"after" in (export / "patch.diff").read_bytes()

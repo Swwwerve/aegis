@@ -382,6 +382,7 @@ def test_model_driven_plan_contains_only_selected_grounded_context(repository):
 
 def test_invented_snippets_and_budgets_are_explicit(repository):
     async def exercise():
+
         planner = ContextPlanner(
             repository, CVE, report(repository), limits=ContextLimits(max_tool_calls=1)
         )
@@ -508,6 +509,8 @@ def test_sandbox_gets_selected_packet_and_rejects_stale_source(repository, monke
             return SimpleNamespace(final_output="done")
 
     async def exercise():
+        from test_remediation_planning import PlanModel
+
         workspace = Workspace()
         executor = SandboxExecutor(workspace)
         packet, result = await executor.remediate_with_context(
@@ -516,9 +519,10 @@ def test_sandbox_gets_selected_packet_and_rejects_stale_source(repository, monke
             report(repository),
             model=PlanningModel(),
             investigator_model=ReviewModel(),
+            planner_model=PlanModel(),
         )
-        assert packet.status == "completed" and result.final_output == "done"
-        assert workspace.prompts == [packet.remediation_prompt()]
+        assert packet.status == "completed" and result.status == "ready"
+        assert workspace.prompts == []
         workspace.stale = True
         packet, result = await executor.remediate_with_context(
             repository,
@@ -528,7 +532,7 @@ def test_sandbox_gets_selected_packet_and_rejects_stale_source(repository, monke
             investigator_model=ReviewModel(),
         )
         assert packet.status == "partial" and result is None
-        assert len(workspace.prompts) == 1
+        assert workspace.prompts == []
 
     asyncio.run(exercise())
 

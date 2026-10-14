@@ -9,6 +9,7 @@ from test_vulnerabilities import api  # noqa: F401 -- shared database and clone 
 from aegis.backend.api.remediation import (
     ContextInvestigationRequest,
     get_context_engine,
+    get_plan_engine,
     investigate_context,
 )
 from aegis.backend.context.context_planner import ContextPacket
@@ -157,3 +158,43 @@ def test_disconnect_cancels_context_investigation(api):  # noqa: F811
             assert cancelled.is_set()
 
     asyncio.run(exercise())
+
+
+def test_plan_endpoint_streams_proposals_without_changing_source_or_history(api):  # noqa: F811
+    from aegis.backend.schemas.remediation import incomplete_plan
+
+    client, sessions, clone = api
+    scan_id = save_scan(client)
+    before = {
+        p.relative_to(clone).as_posix(): p.read_bytes()
+        for p in clone.rglob("*")
+        if p.is_file()
+    }
+
+    async def engine(path, cve_id, report, *, progress, clarification):
+        await progress(
+            {
+                "stage": "remediation_skills",
+                "status": "running",
+                "message": "Selecting the required planning skill",
+            }
+        )
+        return incomplete_plan(
+            cve_id,
+            "needs_context",
+            "Additional caller evidence is required for the proposal",
+        )
+
+    app.dependency_overrides[get_plan_engine] = lambda: engine
+    response = client.post(
+        "/api/remediation/plan/stream", json={"scan_id": scan_id, "cve_id": CVE}
+    )
+    assert response.status_code == 200
+    assert frames(response)[1][1]["status"] == "needs_context"
+    assert before == {
+        p.relative_to(clone).as_posix(): p.read_bytes()
+        for p in clone.rglob("*")
+        if p.is_file()
+    }
+    with sessions() as db:
+        assert db.scalar(select(func.count()).select_from(ScanRun)) == 1

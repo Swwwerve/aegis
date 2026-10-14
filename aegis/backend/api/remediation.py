@@ -15,6 +15,7 @@ from ..db.database import get_db
 from ..db.models import Repository, ScanRun
 from ..sandbox.policies import validate_repository_path
 from ..schemas.vulnerability import ScanReport
+from ..services.remediation_service import plan_repository_remediation
 
 router = APIRouter()
 
@@ -35,6 +36,23 @@ async def investigate_context(
     db: Annotated[Session, Depends(get_db)],
     engine: Annotated[object, Depends(get_context_engine)],
 ):
+    return await _stream_operation(request, db, engine, "Context investigation")
+
+
+def get_plan_engine():
+    return plan_repository_remediation
+
+
+@router.post("/plan/stream")
+async def create_remediation_plan(
+    request: ContextInvestigationRequest,
+    db: Annotated[Session, Depends(get_db)],
+    engine: Annotated[object, Depends(get_plan_engine)],
+):
+    return await _stream_operation(request, db, engine, "Remediation planning")
+
+
+async def _stream_operation(request, db, engine, label):
     run = db.get(ScanRun, request.scan_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Scan not found")
@@ -82,7 +100,7 @@ async def investigate_context(
                     (
                         "error",
                         {
-                            "message": "Context investigation could not finish. Retry or inspect the saved scan."
+                            "message": f"{label} could not finish. Retry or inspect the saved scan."
                         },
                     )
                 )

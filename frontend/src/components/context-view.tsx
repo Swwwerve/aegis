@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, Search, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { downloadJson, streamContext } from "@/lib/api";
-import type { ContextPacket, ProgressEvent } from "@/lib/types";
+import { downloadJson, streamContext, streamPlan } from "@/lib/api";
+import type {
+  ContextPacket,
+  ProgressEvent,
+  RemediationPlan,
+} from "@/lib/types";
 import { StateBadge } from "./analysis-view";
 
 export function ContextView({
@@ -15,6 +19,7 @@ export function ContextView({
   const [busy, setBusy] = useState(false);
   const [events, setEvents] = useState<ProgressEvent[]>([]);
   const [packet, setPacket] = useState<ContextPacket | null>(null);
+  const [plan, setPlan] = useState<RemediationPlan | null>(null);
   const [error, setError] = useState("");
   const [clarification, setClarification] = useState("");
   const controller = useRef<AbortController | null>(null);
@@ -34,6 +39,7 @@ export function ContextView({
     setBusy(true);
     setError("");
     setEvents([]);
+    setPlan(null);
     try {
       await streamContext(
         scanId,
@@ -50,6 +56,37 @@ export function ContextView({
           : e instanceof Error
             ? e.message
             : "Investigation could not finish.",
+      );
+    } finally {
+      setBusy(false);
+      controller.current = null;
+    }
+  }
+
+  async function proposePlan() {
+    if (busy || packet?.status !== "completed") return;
+    const abort = new AbortController();
+    controller.current = abort;
+    setBusy(true);
+    setError("");
+    setEvents([]);
+    setPlan(null);
+    try {
+      await streamPlan(
+        scanId,
+        cveId,
+        clarification,
+        abort.signal,
+        (event) => setEvents((previous) => [...previous, event].slice(-100)),
+        setPlan,
+      );
+    } catch (e) {
+      setError(
+        abort.signal.aborted
+          ? "Planning stopped."
+          : e instanceof Error
+            ? e.message
+            : "Planning failed.",
       );
     } finally {
       setBusy(false);
@@ -99,6 +136,16 @@ export function ContextView({
         </div>
       )}
       <div className="flex flex-wrap gap-2">
+        {packet?.status === "completed" && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => void proposePlan()}
+          >
+            Create remediation plan
+          </Button>
+        )}
         <Button
           size="sm"
           disabled={busy || (needsInput && !clarification.trim())}
@@ -141,6 +188,73 @@ export function ContextView({
         <p role="alert" className="text-sm text-amber-900">
           {error}
         </p>
+      )}
+      {plan && !busy && (
+        <section
+          aria-label="Remediation plan"
+          className="space-y-3 rounded-md border p-3"
+        >
+          <h4 className="text-sm font-semibold">Proposed remediation plan</h4>
+          <p className="text-xs text-muted-foreground">
+            Changes and checks below are proposals for review. No files were
+            changed or commands executed.
+          </p>
+          <StateBadge status={plan.status} />
+          <p className="text-sm">{plan.summary}</p>
+          <p className="text-xs">
+            Skills used: {plan.skills_used.join(", ") || "None"}
+          </p>
+          {!!plan.version_changes.length && (
+            <div className="space-y-2 text-xs">
+              <h5 className="font-semibold">Proposed dependency changes</h5>
+              {plan.version_changes.map((change, i) => (
+                <p key={i} className="mono break-all">
+                  {change.package}: {change.installed_version} →{" "}
+                  {change.proposed_version}
+                </p>
+              ))}
+            </div>
+          )}
+          <ol className="list-decimal space-y-2 pl-5 text-sm">
+            {plan.steps.map((step, i) => (
+              <li key={i}>
+                <p>{step.description}</p>
+                <p className="mono break-all text-xs text-muted-foreground">
+                  {step.paths.join(", ")}
+                </p>
+              </li>
+            ))}
+          </ol>
+          {!!plan.validation.length && (
+            <div className="space-y-2 text-xs">
+              <h5 className="font-semibold">Proposed validation</h5>
+              {plan.validation.map((check, i) => (
+                <div key={i}>
+                  <p>{check.description}</p>
+                  {!!check.argv.length && (
+                    <code className="mono block break-all">
+                      {check.cwd}: {check.argv.join(" ")}
+                    </code>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {[...plan.risks, ...plan.missing_context].map((note, i) => (
+            <p key={i} className="text-xs text-amber-900">
+              {note}
+            </p>
+          ))}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              downloadJson(plan, `aegis-plan-${scanId}-${cveId}.json`)
+            }
+          >
+            Export plan
+          </Button>
+        </section>
       )}
       {!!events.length && (
         <div
