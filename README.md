@@ -6,6 +6,30 @@ The `aegis/backend` package contains the FastAPI application and production
 logic. Benchmark material lives under `evals`, tests under `tests`, and
 deployment/UI placeholders under `docker` and `frontend`.
 
+## Directory layout
+
+```text
+Aegis/
+  aegis/backend/          Python application package
+    core/config.py       Environment-backed settings
+    db/models.py         Database models
+    api/                 HTTP endpoints
+    agents/              Agent definitions
+    sandbox/             Restricted Docker execution
+  docker/                Dockerfiles, including the sandbox image
+  frontend/              Reserved for the web UI
+  tests/                 Automated tests
+  scripts/               Developer utilities and smoke tests
+  evals/                 Reserved for evaluation benchmarks
+  workspaces/            Generated repository clones (ignored by Git)
+  sandbox-smoke-results/ Generated test artifacts (ignored by Git)
+  pyproject.toml         Python dependencies and packaging
+```
+
+Keep Docker build files, frontend code, tests, and scripts at the project root.
+Runtime data belongs outside the Python package. The database (`aegis.db`),
+local environment (`.env`), and virtual environment (`.venv/`) are ignored by Git.
+
 ## Setup
 
 ```powershell
