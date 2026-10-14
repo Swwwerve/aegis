@@ -70,7 +70,9 @@ async def scan_repository(
             analysis = await resolve_repository_analysis(path, analysis)
         if request.use_model:
             analysis = await analyze_with_model(path, report=analysis)
-        report = await scanner.scan(analysis)
+        report = await scanner.scan(
+            analysis, repository_path=path, use_model=request.use_model
+        )
         for finding in report.vulnerabilities:
             db.add(
                 VulnerabilityFinding(

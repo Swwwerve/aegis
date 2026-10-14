@@ -37,11 +37,75 @@ local environment (`.env`), and virtual environment (`.venv/`) are ignored by Gi
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
-Copy-Item .env.example .env
+# Optional: create .env with OPENAI_API_KEY=... for model-assisted analysis.
 uvicorn aegis.backend.main:app --reload
 ```
 
 Run tests with `pytest`.
+
+## Step 5: live, model-assisted vulnerability prioritization
+
+`POST /scans` now enriches findings with CVSS base scores (v2/v3/v4 vectors),
+FIRST EPSS probability/percentile/date, CISA KEV catalog matches, advisory source
+links/dates/ranges, confirmed fixes, and static package usage evidence. Findings
+are returned in descending `priority.score` order and saved with their evidence;
+historical scan results retain their original snapshots.
+
+`use_model: true` requests a non-deterministic OpenAI assessment as well as repo
+interpretation. Configure `OPENAI_API_KEY` in the host environment or `.env`.
+The model receives bounded advisory facts and source locations, proposes an
+adjustment of at most 10 points in either direction, and supplies a rationale
+with evidence fields. It cannot overwrite CVSS, EPSS, KEV, fixes, or affected
+status. Model failures retain the evidence score and report their status.
+`use_model: false` still fetches live feeds and computes the evidence baseline.
+No EPSS/CISA credentials are needed; CISA's official GitHub mirror is the fallback.
+
+The application ranking score is 0-100: `5 * CVSS base`, plus
+`30 * sqrt(EPSS probability)`, plus up to 10 points for static package call sites
+(`3 * log2(1 + calls)`), plus 10 for known runtime scopes or 5 for dev/unknown
+scopes. Missing CVSS and EPSS provisionally contribute 25 and 5 respectively.
+A KEV match always scores at least 90 and a model cannot downgrade it.
+Priority levels are critical >=90, high >=70, medium >=40, and low <40.
+This is a configurable-in-code ranking heuristic, not an exploit probability,
+CVSS severity classification, or an industry standard. Fix availability is
+reported for remediation and does not lower risk. `kev: false` means absence
+from the successfully fetched catalog; a feed failure produces `kev: null`.
+
+Inspect `report.prioritization_status`, `priority.missing_evidence`, provider
+statuses/timestamps in `enrichment`, and `priority.model_status`. Scan coverage
+status and prioritization status are independent. EPSS readings preserve every
+available CVE; `epss_probability` is their maximum, with missing aliases flagged.
+EPSS readings older than 7 days are retained as evidence and excluded from scoring.
+A KEV catalog older than 14 days still establishes positive matches, but its
+non-matches become unknown. Both conditions are flagged in provider statuses.
+The newest available CVSS generation is preferred, then the highest base score
+within that generation. Original vectors and advisory ranges remain available.
+CISA catalog due dates are catalog evidence, not application-specific deadlines.
+
+`usage.static_call_count` counts source call sites for the affected package.
+Python uses AST import/alias analysis; Node uses import/require lexical heuristics.
+The bounded scan excludes generated/vendor/cache directories and symlinks.
+Evidence includes source path, line, symbol, method, limits, and scan status.
+Python advisory function names, when supplied, allow exact symbol matching in
+`affected_function_call_count`. Maven package-to-namespace mapping is currently
+unsupported, so Java call evidence is explicitly unknown. Dynamic dispatch,
+wrappers, local module shadowing and transitive usage can leave evidence incomplete.
+No detected call sites proves neither safety nor non-reachability.
+`usage.runtime_call_count` remains null: measuring how often a vulnerable path
+actually executes requires runtime instrumentation, which this step does not add.
+
+Run regression tests and disposable live checks (no fixture code is executed):
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m scripts.smoke_live_scan --prioritize
+# Also exercise OpenAI repo interpretation and priority assessment:
+.\.venv\Scripts\python.exe -m scripts.smoke_live_scan --model
+```
+
+The smoke check uses temporary Git/SQLite fixtures and saves its complete report
+under ignored `sandbox-smoke-results/`. The model check uses your API key.
 
 ## Step 4: live dependency vulnerability scanning
 
@@ -57,8 +121,9 @@ Then call `POST /scans`:
 }
 ```
 
-`use_model` enables Step 3's non-deterministic README/CI interpretation when an
-OpenAI key is available. Advisory discovery uses live OSV data and can change
+`use_model` enables Step 3's non-deterministic README/CI interpretation and
+Step 5's model-assisted priority assessment when an OpenAI key is available.
+Advisory discovery uses live OSV data and can change
 between scans. Vulnerability identities, affected status, and fix versions are
 grounded in advisory evidence. Models do not populate vulnerability fields or
 choose dependency versions; their separate repo interpretation is retained in

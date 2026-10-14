@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session
 from ..db.database import get_db
 from ..db.models import Repository, ScanRun
 from ..schemas.vulnerability import ScanRead, ScanRequest
+from ..security.advisory_client import AdvisoryClient
+from ..security.epss_client import EPSSClient
+from ..security.kev_client import KEVClient
 from ..security.osv_client import OSVClient
 from ..security.vulnerability_scanner import VulnerabilityScanner
 from ..services.scan_service import ScanInputError, scan_read, scan_repository
@@ -18,8 +21,8 @@ router = APIRouter()
 
 
 async def get_scanner() -> AsyncGenerator[VulnerabilityScanner, None]:
-    async with OSVClient() as client:
-        yield VulnerabilityScanner(client)
+    async with OSVClient() as client, EPSSClient() as epss, KEVClient() as kev:
+        yield VulnerabilityScanner(client, advisory_client=AdvisoryClient(epss, kev))
 
 
 @router.post("", response_model=ScanRead, status_code=201)

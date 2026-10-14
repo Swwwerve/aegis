@@ -1,5 +1,6 @@
 """Exercise Step 4 against live OSV using a disposable ingested-repository fixture."""
 
+import argparse
 import asyncio
 import json
 import subprocess
@@ -14,12 +15,15 @@ from aegis.backend.core.config import settings
 from aegis.backend.db.database import Base
 from aegis.backend.db.models import Repository, VulnerabilityFinding
 from aegis.backend.schemas.vulnerability import ScanRequest
+from aegis.backend.security.advisory_client import AdvisoryClient
+from aegis.backend.security.epss_client import EPSSClient
+from aegis.backend.security.kev_client import KEVClient
 from aegis.backend.security.osv_client import OSVClient
 from aegis.backend.security.vulnerability_scanner import VulnerabilityScanner
 from aegis.backend.services.scan_service import scan_read, scan_repository
 
 
-async def main():
+async def main(*, prioritize=False, use_model=False):
     output = Path("sandbox-smoke-results") / ("osv-" + uuid4().hex + ".json")
     output.parent.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="aegis-osv-") as temporary:
@@ -30,6 +34,12 @@ async def main():
             subprocess.run, ["git", "init", str(clone)], check=True, capture_output=True
         )
         (clone / "requirements.txt").write_text("urllib3==1.26.4\n")
+        (clone / "app.py").write_text(
+            'import urllib3\nhttp = urllib3.PoolManager()\nurllib3.request("GET", "https://example.invalid")\n'
+        )
+        (clone / "app.js").write_text(
+            'const lodash = require("lodash");\nlodash.merge({}, {});\n'
+        )
         (clone / "package-lock.json").write_text(
             json.dumps(
                 {
@@ -78,11 +88,20 @@ async def main():
                 )
                 db.add(repository)
                 db.commit()
-                async with OSVClient() as client:
+                async with (
+                    OSVClient() as client,
+                    EPSSClient() as epss,
+                    KEVClient() as kev,
+                ):
                     run = await scan_repository(
                         db,
-                        ScanRequest(repository_id=repository.id, use_model=False),
-                        VulnerabilityScanner(client),
+                        ScanRequest(repository_id=repository.id, use_model=use_model),
+                        VulnerabilityScanner(
+                            client,
+                            advisory_client=AdvisoryClient(epss, kev)
+                            if prioritize
+                            else None,
+                        ),
                     )
                 result = scan_read(run)
                 output.write_text(result.model_dump_json(indent=2), encoding="utf-8")
@@ -112,6 +131,24 @@ async def main():
                 stored = list(db.scalars(select(VulnerabilityFinding)))
                 assert len(stored) == len(report.vulnerabilities)
                 assert run.commit_sha is not None
+                if prioritize:
+                    log4shell = next(
+                        f for f in report.vulnerabilities if "CVE-2021-44228" in f.cves
+                    )
+                    assert log4shell.kev is True and log4shell.priority.score >= 90
+                    assert log4shell.epss_probability is not None
+                    assert example.usage.static_call_count == 2
+                    assert example.usage.runtime_call_count is None
+                    assert all(f.priority is not None for f in report.vulnerabilities)
+                    assert json.loads(stored[0].data)["priority"]
+                    if use_model:
+                        assert any(
+                            f.priority.model_status == "completed"
+                            for f in report.vulnerabilities
+                        ), report.warnings
+                    print(
+                        f"Live priority passed: Log4Shell score={log4shell.priority.score}, KEV={log4shell.kev}, EPSS={log4shell.epss_probability}; urllib3 static calls={example.usage.static_call_count}."
+                    )
                 print(
                     f"Live OSV scan passed: 3 packages, {report.advisory_records} records, {len(stored)} deduplicated findings."
                 )
@@ -137,4 +174,16 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--prioritize",
+        action="store_true",
+        help="Check live EPSS/KEV and evidence scoring",
+    )
+    parser.add_argument(
+        "--model",
+        action="store_true",
+        help="Also assess priorities with OpenAI (requires OPENAI_API_KEY; implies --prioritize)",
+    )
+    args = parser.parse_args()
+    asyncio.run(main(prioritize=args.prioritize or args.model, use_model=args.model))
