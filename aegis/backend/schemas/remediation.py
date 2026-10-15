@@ -77,6 +77,34 @@ class RemediationPlan(BaseModel):
     missing_context: list[str] = Field(max_length=12)
 
 
+class DependencyPatch(BaseModel):
+    package: str
+    ecosystem: str
+    from_version: str
+    to_version: str
+    files: list[str] = Field(default_factory=list, max_length=12)
+
+
+class PatchResult(BaseModel):
+    """Evidence of a sandbox patch attempt; it is not proof of remediation."""
+
+    remediation_id: str
+    run_id: str
+    cve_id: str
+    status: Literal["completed", "needs_context", "failed", "sandbox_error"]
+    modified_files: list[str] = Field(default_factory=list, max_length=40)
+    dependency_changes: list[DependencyPatch] = Field(
+        default_factory=list, max_length=12
+    )
+    artifact_location: str | None = None
+    commands_executed: list[list[str]] = Field(default_factory=list, max_length=40)
+    errors: list[str] = Field(default_factory=list, max_length=20)
+    unresolved_issues: list[str] = Field(default_factory=list, max_length=20)
+    further_testing_required: bool = True
+    human_intervention_required: bool = False
+    plan_references: list[str] = Field(default_factory=list, max_length=40)
+
+
 def incomplete_plan(cve_id: str, status: str, message: str) -> RemediationPlan:
     return RemediationPlan(
         cve_id=cve_id,

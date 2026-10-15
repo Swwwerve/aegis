@@ -218,6 +218,36 @@ export interface RemediationPlan {
   }[];
   risks: string[];
   missing_context: string[];
+  affected_files?: string[];
+  root_cause?: string;
+  application_code_changes?: string[];
+  reasoning?: string;
+  confidence?: number;
+  human_intervention_required?: boolean;
+  source_references?: { evidence_id: string; path: string; sha256: string | null }[];
+  advisory_references?: { advisory_id: string; source: string; evidence_ids: string[] }[];
+  skill_references?: { name: string; path: string; sha256: string }[];
+}
+export interface PatchResult {
+  remediation_id: string;
+  run_id: string;
+  cve_id: string;
+  status: "completed" | "needs_context" | "failed" | "sandbox_error";
+  modified_files: string[];
+  dependency_changes: {
+    package: string;
+    ecosystem: string;
+    from_version: string;
+    to_version: string;
+    files: string[];
+  }[];
+  artifact_location: string | null;
+  commands_executed: string[][];
+  errors: string[];
+  unresolved_issues: string[];
+  further_testing_required: boolean;
+  human_intervention_required: boolean;
+  plan_references: string[];
 }
 export interface Activity extends ProgressEvent {
   time: string;

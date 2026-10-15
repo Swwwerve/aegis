@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, Search, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { downloadJson, streamContext, streamPlan } from "@/lib/api";
+import { downloadJson, streamContext, streamPatch, streamPlan } from "@/lib/api";
 import type {
   ContextPacket,
+  PatchResult,
   ProgressEvent,
   RemediationPlan,
 } from "@/lib/types";
@@ -20,6 +21,7 @@ export function ContextView({
   const [events, setEvents] = useState<ProgressEvent[]>([]);
   const [packet, setPacket] = useState<ContextPacket | null>(null);
   const [plan, setPlan] = useState<RemediationPlan | null>(null);
+  const [patch, setPatch] = useState<PatchResult | null>(null);
   const [error, setError] = useState("");
   const [clarification, setClarification] = useState("");
   const controller = useRef<AbortController | null>(null);
@@ -40,6 +42,7 @@ export function ContextView({
     setError("");
     setEvents([]);
     setPlan(null);
+    setPatch(null);
     try {
       await streamContext(
         scanId,
@@ -71,6 +74,7 @@ export function ContextView({
     setError("");
     setEvents([]);
     setPlan(null);
+    setPatch(null);
     try {
       await streamPlan(
         scanId,
@@ -91,6 +95,38 @@ export function ContextView({
     } finally {
       setBusy(false);
       controller.current = null;
+    }
+  }
+
+  async function applyPatch() {
+      if (busy || !packet || !plan || plan.status !== "ready") return;
+      const abort = new AbortController();
+      controller.current = abort;
+      setBusy(true);
+      setError("");
+      setPatch(null);
+      setEvents([]);
+      try {
+        await streamPatch(
+          scanId,
+          cveId,
+          plan,
+          packet,
+          abort.signal,
+          (event) => setEvents((previous) => [...previous, event].slice(-100)),
+          setPatch,
+        );
+      } catch (e) {
+        setError(
+          abort.signal.aborted
+            ? "Patch execution stopped."
+            : e instanceof Error
+              ? e.message
+              : "Patch execution failed.",
+        );
+      } finally {
+        setBusy(false);
+        controller.current = null;
     }
   }
 
@@ -204,6 +240,11 @@ export function ContextView({
           <p className="text-xs">
             Skills used: {plan.skills_used.join(", ") || "None"}
           </p>
+          {plan.status === "ready" && packet?.status === "completed" && (
+            <Button size="sm" disabled={busy} onClick={() => void applyPatch()}>
+              Apply patch in isolated sandbox
+            </Button>
+          )}
           {!!plan.version_changes.length && (
             <div className="space-y-2 text-xs">
               <h5 className="font-semibold">Proposed dependency changes</h5>
@@ -254,6 +295,31 @@ export function ContextView({
           >
             Export plan
           </Button>
+        </section>
+      )}
+      {patch && !busy && (
+        <section aria-label="Patch execution" className="space-y-2 rounded-md border p-3">
+          <h4 className="text-sm font-semibold">Sandbox patch execution</h4>
+          <StateBadge status={patch.status} />
+          <p className="text-xs">
+            Modified files: {patch.modified_files.join(", ") || "None"}
+          </p>
+          <p className="text-xs">
+            Commands executed: {patch.commands_executed.length}
+          </p>
+          {patch.artifact_location && (
+            <p className="mono break-all text-xs text-muted-foreground">
+              Patch artifact: {patch.artifact_location}
+            </p>
+          )}
+          {!!patch.errors.length && (
+            <div className="space-y-1 text-xs text-amber-900">
+              {patch.errors.map((item, i) => <p key={i}>{item}</p>)}
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Independent testing is required; a completed sandbox run does not prove remediation.
+          </p>
         </section>
       )}
       {!!events.length && (
