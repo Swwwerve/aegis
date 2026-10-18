@@ -226,6 +226,18 @@ contents rather than enabling container networking.
 
 ## Test production remediation planning and patching
 
+The interface uses a dark shadcn/ui theme with Overview, Repositories, and
+Scan history in the top navigation. The agent activity panel expands into
+observed actions, tool calls, and evidence; remediation plans also include
+their supplied rationale and source references.
+
+To inspect dependency retrieval, enable **Resolve dependency graph** before
+starting a scan. The **Docker execution** panel shows each command, working
+directory, stdout, stderr, and exit code. Output arrives when each command
+finishes, rather than line by line. New scan reports retain these logs in
+history and JSON exports; older scans may have no execution logs. The sandbox
+uses offline caches, so missing dependencies are reported explicitly.
+
 The production flow requires a real registered repository, a completed context
 investigation, verified vulnerability evidence, and a `RemediationPlan` with
 `status: ready`.
@@ -239,6 +251,18 @@ investigation, verified vulnerability evidence, and a `RemediationPlan` with
 7. Review the live tool events and returned patch artifact.
 8. Treat `further_testing_required: true` as mandatory: the Patch Agent does not
    claim that a vulnerability is fixed solely because a version changed.
+
+Every declared validation command runs even if the model omits its tool call.
+Open **Patch verification → Validation results** to review passed, failed,
+pending, and skipped checks. Failed, skipped, unavailable, or timed-out checks
+make the patch result require review. No recorded checks means no validation
+has been demonstrated. Download execution logs or export the patch result to
+retain the evidence. Console output is bounded to 16,384 characters per stream
+per command, with a visible truncation notice.
+
+The development Patch Agent demo also runs a declared Python command to verify
+the synthetic dependency version and displays its real Docker output. It is a
+fixture check, not a security regression test for your repository.
 
 Production patch execution requires Docker and an OpenAI key because the
 application-code reasoning path uses the configured Agents SDK model. All

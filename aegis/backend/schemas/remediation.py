@@ -3,6 +3,7 @@
 from typing import Literal
 
 from pydantic import BaseModel, Field
+from .execution import ExecutionLog
 
 
 class EvidenceReference(BaseModel):
@@ -67,9 +68,7 @@ class RemediationPlan(BaseModel):
     advisory_references: list[AdvisoryReference] = Field(
         default_factory=list, max_length=12
     )
-    skill_references: list[SkillReference] = Field(
-        default_factory=list, max_length=8
-    )
+    skill_references: list[SkillReference] = Field(default_factory=list, max_length=8)
     steps: list[PlanStep] = Field(max_length=20)
     version_changes: list[VersionChange] = Field(max_length=12)
     validation: list[ProposedCheck] = Field(max_length=12)
@@ -98,6 +97,7 @@ class PatchResult(BaseModel):
     )
     artifact_location: str | None = None
     commands_executed: list[list[str]] = Field(default_factory=list, max_length=40)
+    execution_results: list[ExecutionLog] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list, max_length=20)
     unresolved_issues: list[str] = Field(default_factory=list, max_length=20)
     further_testing_required: bool = True

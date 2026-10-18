@@ -449,3 +449,188 @@ test("offline status, URL validation and responsive empty state", async ({
     ),
   ).toBe(true);
 });
+
+test("saved Docker output stays reviewable and untrusted output is plain text", async ({
+  page,
+}) => {
+  await mock(page);
+  const output = {
+    command_id: "resolution-1",
+    argv: ["npm", "ls", "--all"],
+    cwd: ".",
+    phase: "resolution",
+    status: "passed",
+    exit_code: 0,
+    stdout: "urllib3@1.26.4\n<script>window.injected=true</script>",
+    stderr: "",
+    truncated: true,
+  };
+  const saved = {
+    ...scan,
+    report: {
+      ...scan.report!,
+      repository_analysis: { ...analysis, execution_results: [output] },
+    },
+  };
+  await page.route("**/api/scans/stream", (route) =>
+    route.fulfill({ contentType: "text/event-stream", body: events(saved) }),
+  );
+  await start(page);
+  const terminal = page.getByRole("region", { name: "Docker execution" });
+  await expect(terminal.getByLabel("Standard output")).toContainText(
+    "urllib3@1.26.4",
+  );
+  await expect(terminal.getByLabel("Standard output")).toContainText(
+    "<script>",
+  );
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { injected?: boolean }).injected,
+    ),
+  ).toBeUndefined();
+  await expect(terminal).toContainText("exit 0");
+  await expect(terminal).toContainText("Output truncated");
+  const download = page.waitForEvent("download");
+  await terminal
+    .getByRole("button", { name: "Download execution logs" })
+    .click();
+  expect((await download).suggestedFilename()).toBe("aegis-execution.json");
+  await navigate(page, "Scan history");
+  await page.getByRole("button", { name: /Scan #19/ }).click();
+  await expect(page.getByLabel("Standard output")).toContainText(
+    "urllib3@1.26.4",
+  );
+  expect(await page.locator("aside").count()).toBe(0);
+  expect(
+    (await page
+      .getByRole("navigation", { name: "Main navigation" })
+      .boundingBox())!.y,
+  ).toBeLessThan(130);
+});
+
+test("patch flow shows plan rationale, Docker stderr and failed validation", async ({
+  page,
+}) => {
+  await mock(page);
+  const frame = (event: string, data: unknown) =>
+    `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const packet = {
+    cve_id: "CVE-2023-45803",
+    status: "completed",
+    investigation_status: "completed",
+    snippets: [],
+    context_requests: [],
+    resolved_ambiguities: [],
+    missing_context: [],
+    diagnostics: [],
+    tool_calls: 1,
+    retrieved_chars: 80,
+  };
+  const plan = {
+    cve_id: packet.cve_id,
+    status: "ready",
+    summary: "Update the confirmed pin and check the callers",
+    reasoning: "The selected caller uses the affected dependency.",
+    root_cause: "An affected version is pinned.",
+    skills_used: ["python-remediation"],
+    steps: [
+      {
+        kind: "dependency",
+        description: "Update the owning pin",
+        paths: ["requirements.txt"],
+        evidence_ids: ["pin"],
+      },
+    ],
+    version_changes: [],
+    validation: [
+      {
+        description: "Regression suite",
+        argv: ["python", "-m", "pytest"],
+        cwd: ".",
+        evidence_ids: ["tests"],
+      },
+    ],
+    risks: [],
+    missing_context: [],
+  };
+  const log = {
+    command_id: "check-1",
+    argv: ["python", "-m", "pytest"],
+    cwd: ".",
+    phase: "validation",
+    status: "failed",
+    exit_code: 1,
+    stdout: "2 passed, 1 failed",
+    stderr: "AssertionError: regression in the request caller",
+  };
+  const patch = {
+    remediation_id: "fix-1",
+    run_id: "run-1",
+    cve_id: packet.cve_id,
+    status: "failed",
+    modified_files: ["requirements.txt"],
+    dependency_changes: [],
+    artifact_location: null,
+    commands_executed: [log.argv],
+    execution_results: [log],
+    errors: ["Validation failed"],
+    unresolved_issues: ["Regression needs review"],
+    further_testing_required: true,
+    human_intervention_required: true,
+    plan_references: ["pin"],
+  };
+  await page.route("**/api/remediation/context/stream", (route) =>
+    route.fulfill({
+      contentType: "text/event-stream",
+      body: frame("result", packet),
+    }),
+  );
+  await page.route("**/api/remediation/plan/stream", (route) =>
+    route.fulfill({
+      contentType: "text/event-stream",
+      body: frame("result", plan),
+    }),
+  );
+  await page.route("**/api/remediation/patch/stream", (route) =>
+    route.fulfill({
+      contentType: "text/event-stream",
+      body:
+        frame("progress", {
+          stage: "container",
+          message: "Docker command returned",
+          ...log,
+        }) + frame("result", patch),
+    }),
+  );
+  await start(page);
+  await page
+    .getByRole("button", { name: "Inspect urllib3 CVE-2023-45803" })
+    .click();
+  const dialog = page.getByRole("dialog");
+  await dialog
+    .getByRole("button", { name: "Investigate context", exact: true })
+    .click();
+  await dialog.getByRole("button", { name: "Create remediation plan" }).click();
+  await expect(dialog.getByText(plan.reasoning)).toBeVisible();
+  await dialog
+    .getByRole("button", { name: "Apply patch in isolated sandbox" })
+    .click();
+  await expect(dialog.getByLabel("Standard error")).toContainText(
+    "AssertionError",
+  );
+  await expect(dialog.getByLabel("Standard output")).toContainText(
+    "2 passed, 1 failed",
+  );
+  await dialog.getByRole("tab", { name: "Validation results" }).click();
+  await expect(dialog.getByText("1 failed", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("0 passed", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Regression needs review")).toBeVisible();
+  const accessibility = await new AxeBuilder({ page })
+    .include('[role="dialog"]')
+    .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+    .analyze();
+  expect(accessibility.violations).toEqual([]);
+  await dialog.screenshot({
+    path: `test-results/patch-${test.info().project.name}.png`,
+  });
+});

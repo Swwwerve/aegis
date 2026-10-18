@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, Search, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { downloadJson, streamContext, streamPatch, streamPlan } from "@/lib/api";
+import {
+  downloadJson,
+  streamContext,
+  streamPatch,
+  streamPlan,
+} from "@/lib/api";
 import type {
   ContextPacket,
   PatchResult,
   ProgressEvent,
   RemediationPlan,
 } from "@/lib/types";
+import { AgentActivity } from "./ai-elements/agent-activity";
+import { ExecutionPanel } from "./ai-elements/execution-panel";
+import { PlanSteps } from "./ai-elements/plan";
 import { StateBadge } from "./analysis-view";
 
 export function ContextView({
@@ -18,6 +26,9 @@ export function ContextView({
   cveId: string;
 }) {
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<"investigation" | "planning" | "patch">(
+    "investigation",
+  );
   const [events, setEvents] = useState<ProgressEvent[]>([]);
   const [packet, setPacket] = useState<ContextPacket | null>(null);
   const [plan, setPlan] = useState<RemediationPlan | null>(null);
@@ -36,6 +47,8 @@ export function ContextView({
 
   async function investigate() {
     if (busy) return;
+    setPhase("investigation");
+    setPacket(null);
     const abort = new AbortController();
     controller.current = abort;
     setBusy(true);
@@ -72,7 +85,7 @@ export function ContextView({
     controller.current = abort;
     setBusy(true);
     setError("");
-    setEvents([]);
+    setPhase("planning");
     setPlan(null);
     setPatch(null);
     try {
@@ -99,34 +112,34 @@ export function ContextView({
   }
 
   async function applyPatch() {
-      if (busy || !packet || !plan || plan.status !== "ready") return;
-      const abort = new AbortController();
-      controller.current = abort;
-      setBusy(true);
-      setError("");
-      setPatch(null);
-      setEvents([]);
-      try {
-        await streamPatch(
-          scanId,
-          cveId,
-          plan,
-          packet,
-          abort.signal,
-          (event) => setEvents((previous) => [...previous, event].slice(-100)),
-          setPatch,
-        );
-      } catch (e) {
-        setError(
-          abort.signal.aborted
-            ? "Patch execution stopped."
-            : e instanceof Error
-              ? e.message
-              : "Patch execution failed.",
-        );
-      } finally {
-        setBusy(false);
-        controller.current = null;
+    if (busy || !packet || !plan || plan.status !== "ready") return;
+    const abort = new AbortController();
+    controller.current = abort;
+    setBusy(true);
+    setError("");
+    setPatch(null);
+    setPhase("patch");
+    try {
+      await streamPatch(
+        scanId,
+        cveId,
+        plan,
+        packet,
+        abort.signal,
+        (event) => setEvents((previous) => [...previous, event].slice(-100)),
+        setPatch,
+      );
+    } catch (e) {
+      setError(
+        abort.signal.aborted
+          ? "Patch execution stopped."
+          : e instanceof Error
+            ? e.message
+            : "Patch execution failed.",
+      );
+    } finally {
+      setBusy(false);
+      controller.current = null;
     }
   }
 
@@ -145,7 +158,7 @@ export function ContextView({
         {packet && !busy && <StateBadge status={packet.status} />}
       </div>
       {needsInput && !busy && (
-        <div className="space-y-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">
+        <div className="space-y-3 rounded-md bg-amber-500/10 p-3 text-sm text-amber-300">
           <h4 className="font-semibold">Additional context needed</h4>
           {packet!.context_requests.length
             ? packet!.context_requests.map((request, i) => (
@@ -166,7 +179,7 @@ export function ContextView({
             value={clarification}
             onChange={(e) => setClarification(e.target.value)}
             maxLength={4000}
-            className="min-h-24 w-full rounded-md border bg-white p-3 text-sm text-foreground"
+            className="min-h-24 w-full rounded-md border bg-card p-3 text-sm text-foreground"
             placeholder="Provide the relevant facts or describe where to find the missing evidence."
           />
         </div>
@@ -193,7 +206,11 @@ export function ContextView({
             <Search size={14} />
           )}
           {busy
-            ? "Investigating context"
+            ? phase === "patch"
+              ? "Applying patch & running checks"
+              : phase === "planning"
+                ? "Creating remediation plan"
+                : "Investigating context"
             : needsInput
               ? "Continue investigation"
               : "Investigate context"}
@@ -204,7 +221,7 @@ export function ContextView({
             variant="outline"
             onClick={() => controller.current?.abort()}
           >
-            Stop investigation
+            Stop viewing
           </Button>
         )}
         {packet && !busy && (
@@ -221,24 +238,25 @@ export function ContextView({
         )}
       </div>
       {error && (
-        <p role="alert" className="text-sm text-amber-900">
+        <p role="alert" className="text-sm text-amber-300">
           {error}
         </p>
       )}
-      {plan && !busy && (
+      {plan && (
         <section
           aria-label="Remediation plan"
           className="space-y-3 rounded-md border p-3"
         >
           <h4 className="text-sm font-semibold">Proposed remediation plan</h4>
           <p className="text-xs text-muted-foreground">
-            Changes and checks below are proposals for review. No files were
-            changed or commands executed.
+            {phase === "patch"
+              ? "The reviewed plan is shown below. See patch verification for the commands executed and their results."
+              : "Changes and checks below are proposals for review. No files were changed or commands executed."}
           </p>
           <StateBadge status={plan.status} />
           <p className="text-sm">{plan.summary}</p>
           {plan.status !== "ready" && (
-            <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900">
+            <p className="rounded-md bg-amber-500/10 p-2 text-xs text-amber-300">
               The Patch Agent is unavailable for this plan until the status is
               ready. Resolve the listed context or evidence gaps, then continue
               the investigation and create a new plan.
@@ -263,16 +281,7 @@ export function ContextView({
               ))}
             </div>
           )}
-          <ol className="list-decimal space-y-2 pl-5 text-sm">
-            {plan.steps.map((step, i) => (
-              <li key={i}>
-                <p>{step.description}</p>
-                <p className="mono break-all text-xs text-muted-foreground">
-                  {step.paths.join(", ")}
-                </p>
-              </li>
-            ))}
-          </ol>
+          <PlanSteps plan={plan} />
           {!!plan.validation.length && (
             <div className="space-y-2 text-xs">
               <h5 className="font-semibold">Proposed validation</h5>
@@ -289,7 +298,7 @@ export function ContextView({
             </div>
           )}
           {[...plan.risks, ...plan.missing_context].map((note, i) => (
-            <p key={i} className="text-xs text-amber-900">
+            <p key={i} className="text-xs text-amber-300">
               {note}
             </p>
           ))}
@@ -305,7 +314,10 @@ export function ContextView({
         </section>
       )}
       {patch && !busy && (
-        <section aria-label="Patch execution" className="space-y-2 rounded-md border p-3">
+        <section
+          aria-label="Patch execution"
+          className="space-y-2 rounded-md border p-3"
+        >
           <h4 className="text-sm font-semibold">Sandbox patch execution</h4>
           <StateBadge status={patch.status} />
           <p className="text-xs">
@@ -320,28 +332,58 @@ export function ContextView({
             </p>
           )}
           {!!patch.errors.length && (
-            <div className="space-y-1 text-xs text-amber-900">
-              {patch.errors.map((item, i) => <p key={i}>{item}</p>)}
+            <div className="space-y-1 text-xs text-amber-300">
+              {patch.errors.map((item, i) => (
+                <p key={i}>{item}</p>
+              ))}
             </div>
           )}
+          {!!patch.dependency_changes.length && (
+            <div className="space-y-1 text-xs">
+              <h5 className="font-semibold">Reported dependency changes</h5>
+              {patch.dependency_changes.map((change, i) => (
+                <p key={i} className="mono break-all">
+                  {change.package}: {change.from_version} ? {change.to_version}
+                </p>
+              ))}
+            </div>
+          )}
+          {!!patch.unresolved_issues.length && (
+            <div className="space-y-1 text-xs text-amber-300">
+              {patch.unresolved_issues.map((issue, i) => (
+                <p key={i}>{issue}</p>
+              ))}
+            </div>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              downloadJson(patch, `aegis-patch-${scanId}-${cveId}.json`)
+            }
+          >
+            Export patch result
+          </Button>
           <p className="text-xs text-muted-foreground">
-            Independent testing is required; a completed sandbox run does not prove remediation.
+            Independent testing is required; a completed sandbox run does not
+            prove remediation.
           </p>
         </section>
       )}
       {!!events.length && (
-        <div
-          role="log"
-          aria-label="Context investigation progress"
-          aria-live="polite"
-          className="max-h-44 space-y-2 overflow-y-auto rounded-md bg-muted p-3 text-xs"
-        >
-          {events.map((event, i) => (
-            <p key={i} className="break-words">
-              {event.message}
-            </p>
-          ))}
-        </div>
+        <AgentActivity
+          events={events}
+          running={busy}
+          label="Context investigation progress"
+        />
+      )}
+      {(phase === "patch" || !!patch?.execution_results?.length) && (
+        <ExecutionPanel
+          events={events}
+          results={patch?.execution_results}
+          running={busy}
+          validation
+        />
       )}
       {packet && !busy && (
         <div className="space-y-3">

@@ -25,6 +25,7 @@ export interface Command {
   requires_network: boolean;
 }
 export interface Analysis {
+  execution_results?: ExecutionLog[];
   languages: Record<string, number>;
   primary_language: string | null;
   files_examined: number;
@@ -163,6 +164,27 @@ export interface ProgressEvent {
   tool?: string;
   tool_calls?: number;
   retrieved_chars?: number;
+  command_id?: string;
+  argv?: string[];
+  cwd?: string;
+  phase?: "resolution" | "validation";
+  stdout?: string;
+  stderr?: string;
+  exit_code?: number | null;
+  truncated?: boolean;
+  reason?: string;
+}
+export interface ExecutionLog {
+  command_id: string;
+  argv: string[];
+  cwd: string;
+  phase: "resolution" | "validation";
+  status: string;
+  stdout?: string;
+  stderr?: string;
+  exit_code?: number | null;
+  truncated?: boolean;
+  reason?: string;
 }
 export interface ContextPacket {
   cve_id: string;
@@ -224,11 +246,20 @@ export interface RemediationPlan {
   reasoning?: string;
   confidence?: number;
   human_intervention_required?: boolean;
-  source_references?: { evidence_id: string; path: string; sha256: string | null }[];
-  advisory_references?: { advisory_id: string; source: string; evidence_ids: string[] }[];
+  source_references?: {
+    evidence_id: string;
+    path: string;
+    sha256: string | null;
+  }[];
+  advisory_references?: {
+    advisory_id: string;
+    source: string;
+    evidence_ids: string[];
+  }[];
   skill_references?: { name: string; path: string; sha256: string }[];
 }
 export interface PatchResult {
+  execution_results?: ExecutionLog[];
   remediation_id: string;
   run_id: string;
   cve_id: string;

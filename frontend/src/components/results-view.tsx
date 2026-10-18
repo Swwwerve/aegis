@@ -31,10 +31,10 @@ import { cn } from "@/lib/utils";
 import { ContextView } from "./context-view";
 
 const levelColors: Record<string, string> = {
-  critical: "bg-red-50 text-red-700 border-red-100",
-  high: "bg-orange-50 text-orange-700 border-orange-100",
-  medium: "bg-amber-50 text-amber-800 border-amber-100",
-  low: "bg-slate-100 text-slate-600 border-slate-200",
+  critical: "bg-red-500/10 text-red-300 border-red-400/20",
+  high: "bg-orange-500/10 text-orange-300 border-orange-400/20",
+  medium: "bg-amber-500/10 text-amber-300 border-amber-400/20",
+  low: "bg-muted text-muted-foreground border-border",
 };
 export function percent(value: number | null | undefined) {
   return value == null
@@ -139,8 +139,8 @@ export function ResultsView({ scan }: { scan: Scan }) {
         className={cn(
           "flex items-start gap-3 rounded-lg border p-4",
           report.status === "completed"
-            ? "border-emerald-200 bg-emerald-50/40"
-            : "border-amber-200 bg-amber-50/40",
+            ? "border-emerald-400/20 bg-emerald-500/10"
+            : "border-amber-400/20 bg-amber-500/10",
         )}
       >
         <Activity size={17} className="mt-0.5 shrink-0" />
@@ -152,7 +152,7 @@ export function ResultsView({ scan }: { scan: Scan }) {
               {report.prioritization_status.replaceAll("_", " ")}
             </span>
           </div>
-          <p className="mt-2 text-xs leading-5 text-slate-600">
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
             {report.status === "completed"
               ? "All identified exact versions were queried. Results cover known dependency advisories; they do not establish source-code safety."
               : "Coverage is incomplete. Available findings are retained; unresolved versions or provider errors may leave additional vulnerabilities undiscovered."}
@@ -188,7 +188,7 @@ export function ResultsView({ scan }: { scan: Scan }) {
                 </div>
                 <select
                   aria-label="Filter by priority"
-                  className="h-9 rounded-md border bg-white px-3 text-xs"
+                  className="h-9 rounded-md border bg-card px-3 text-xs"
                   value={level}
                   onChange={(e) => setLevel(e.target.value)}
                 >
@@ -257,7 +257,7 @@ export function ResultsView({ scan }: { scan: Scan }) {
                           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                             {f.cve || f.advisory_id}
                             {f.kev === true && (
-                              <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
+                              <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-[11px] font-medium text-red-300">
                                 KNOWN EXPLOITED
                               </span>
                             )}
@@ -399,7 +399,7 @@ export function ResultsView({ scan }: { scan: Scan }) {
 function FindingDetail({ finding: f }: { finding: Finding }) {
   return (
     <div className="space-y-6">
-      <p className="text-sm leading-6 text-slate-600">
+      <p className="text-sm leading-6 text-muted-foreground">
         {f.summary || "No advisory summary provided."}
       </p>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -458,7 +458,7 @@ function FindingDetail({ finding: f }: { finding: Finding }) {
             ))}
           </details>
           {f.priority.model_reason && (
-            <div className="mt-4 rounded-lg border bg-orange-50/30 p-4">
+            <div className="mt-4 rounded-lg border bg-orange-500/10 p-4">
               <p className="mb-2 flex items-center gap-2 text-xs font-semibold">
                 <Sparkles size={14} />
                 Model assessment <StateBadge status={f.priority.model_status} />
@@ -472,7 +472,7 @@ function FindingDetail({ finding: f }: { finding: Finding }) {
             </p>
           )}
           {!!f.priority.missing_evidence.length && (
-            <p className="mt-3 text-xs leading-5 text-amber-800">
+            <p className="mt-3 text-xs leading-5 text-amber-300">
               Missing evidence: {f.priority.missing_evidence.join(" · ")}
             </p>
           )}
@@ -607,7 +607,7 @@ function FindingDetail({ finding: f }: { finding: Finding }) {
             ))}
         </div>
         {f.kev_entries.map((e, i) => (
-          <div key={i} className="mt-3 rounded-lg bg-red-50/50 p-3 text-xs">
+          <div key={i} className="mt-3 rounded-lg bg-red-500/10 p-3 text-xs">
             <p className="font-medium">CISA KEV · {String(e.cveID)}</p>
             <p className="mt-1">
               Required action: {String(e.requiredAction || "Unknown")}
@@ -647,7 +647,7 @@ function Notes({ title, lines }: { title: string; lines: string[] }) {
           {lines.map((line, i) => (
             <li
               key={i}
-              className="rounded-md bg-amber-50/40 p-3 text-xs leading-5 text-amber-900"
+              className="rounded-md bg-amber-500/10 p-3 text-xs leading-5 text-amber-300"
             >
               {line}
             </li>

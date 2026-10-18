@@ -93,7 +93,9 @@ async def scan_repository(
                 "running",
                 "Resolving dependencies in the network-disabled Docker sandbox.",
             )
-            analysis = await resolve_repository_analysis(path, analysis)
+            analysis = await resolve_repository_analysis(
+                path, analysis, progress=progress
+            )
             await emit(
                 progress,
                 "resolution",

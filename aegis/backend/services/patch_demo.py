@@ -18,6 +18,7 @@ from ..schemas.remediation import (
     AdvisoryReference,
     EvidenceReference,
     PlanStep,
+    ProposedCheck,
     RemediationPlan,
     SkillReference,
     VersionChange,
@@ -192,7 +193,18 @@ def demo_plan() -> RemediationPlan:
                 proposed_version="1.0.1",
             )
         ],
-        validation=[],
+        validation=[
+            ProposedCheck(
+                description="Verify the fixture dependency was updated to the planned version",
+                argv=[
+                    "python",
+                    "-c",
+                    "import json; from pathlib import Path; p=json.loads(Path('package.json').read_text()); actual=p['dependencies']['aegis-demo-package']; print('Demo dependency version: '+actual); assert actual=='1.0.1', 'Unexpected dependency version'; print('PASS: demo dependency matches the remediation plan')",
+                ],
+                cwd=".",
+                evidence_ids=["demo-manifest"],
+            )
+        ],
         risks=["This disposable fixture is not a real vulnerability finding."],
         missing_context=[],
     )

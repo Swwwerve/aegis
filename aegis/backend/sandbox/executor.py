@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
+from ..core.progress import emit
+from ..schemas.execution import ExecutionLog
 
 from ..schemas.repository import (
     CommandPlan,
@@ -45,11 +47,21 @@ print(json.dumps(bool(shutil.which(sys.argv[1]))))
 
 
 class SandboxExecutor:
-    def __init__(self, workspace: SandboxWorkspace, *, max_output_bytes: int = 65536):
+    def __init__(
+        self,
+        workspace: SandboxWorkspace,
+        *,
+        max_output_bytes: int = 65536,
+        progress=None,
+        phase="resolution",
+    ):
         if max_output_bytes < 1:
             raise ValueError("Output limit must be positive")
         self.workspace = workspace
         self.max_output_bytes = max_output_bytes
+        self.progress = progress
+        self.phase = phase
+        self.execution_results: list[ExecutionLog] = []
 
     async def remediate_with_context(
         self,
@@ -114,6 +126,46 @@ class SandboxExecutor:
         return packet, result
 
     async def execute(
+        self, command: CommandPlan, *, timeout: float | None = None
+    ) -> ExecutionResult:
+        command = CommandPlan.model_validate(command.model_dump())
+        command_id = str(uuid4())
+        await emit(
+            self.progress,
+            "container",
+            "running",
+            "Running command in Docker",
+            command_id=command_id,
+            argv=command.argv,
+            cwd=command.cwd,
+            phase=self.phase,
+        )
+        result = await self._execute(command, timeout=timeout)
+        log = ExecutionLog(
+            command_id=command_id,
+            argv=command.argv,
+            cwd=command.cwd,
+            phase=self.phase,
+            status=result.status,
+            exit_code=result.exit_code,
+            stdout=result.stdout[:16384],
+            stderr=result.stderr[:16384],
+            truncated=len(result.stdout) > 16384
+            or len(result.stderr) > 16384
+            or result.reason == "Output truncated",
+            reason=result.reason,
+        )
+        self.execution_results.append(log)
+        await emit(
+            self.progress,
+            "container",
+            result.status,
+            "Docker command returned",
+            **log.model_dump(exclude={"status"}),
+        )
+        return result
+
+    async def _execute(
         self, command: CommandPlan, *, timeout: float | None = None
     ) -> ExecutionResult:
         # Revalidate even if a caller mutated a model instance after construction.
@@ -621,7 +673,7 @@ class SandboxExecutor:
 
 
 async def resolve_repository_analysis(
-    repository_path, report=None, *, workspace_root=None, policy=None
+    repository_path, report=None, *, workspace_root=None, policy=None, progress=None
 ):
     """Resolve an existing clone in one disposable sandbox without host edits."""
     import asyncio
@@ -638,7 +690,10 @@ async def resolve_repository_analysis(
             workspace_root=workspace_root,
             policy=policy or SandboxPolicy.polyglot(),
         ) as workspace:
-            executor = SandboxExecutor(workspace, max_output_bytes=1024 * 1024)
+            executor = SandboxExecutor(
+                workspace, max_output_bytes=1024 * 1024, progress=progress
+            )
+            report.execution_results = executor.execution_results
             for project in report.projects[:20]:
                 project.resolutions = await executor.resolve_project(project)
                 for resolution in project.resolutions:

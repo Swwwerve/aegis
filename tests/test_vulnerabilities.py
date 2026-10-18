@@ -756,7 +756,7 @@ def test_model_interpretation_and_runtime_resolution_integrate_with_scan(
     client, _, _ = api
     from aegis.backend.services import scan_service
 
-    async def resolved(path, report):
+    async def resolved(path, report, *, progress=None):
         report.resolution_status = "completed"
         report.projects[0].dependencies[0].resolved = True
         return report

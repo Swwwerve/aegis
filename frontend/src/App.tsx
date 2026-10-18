@@ -2,11 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   ArrowUpRight,
-  Activity as ActivityIcon,
-  Boxes,
-  ChevronRight,
   Check,
   Circle,
+  ChevronRight,
   CircleAlert,
   Code2,
   Download,
@@ -16,13 +14,11 @@ import {
   History,
   LayoutDashboard,
   LoaderCircle,
-  Menu,
   Plus,
   RefreshCw,
   Shield,
   Sparkles,
   Terminal,
-  X,
   Workflow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -57,11 +53,12 @@ import {
   type Scan,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { AgentActivity } from "@/components/ai-elements/agent-activity";
+import { ExecutionPanel } from "@/components/ai-elements/execution-panel";
 
 type View = "workspace" | "repositories" | "history";
 export default function App() {
   const [view, setView] = useState<View>("workspace");
-  const [mobileNav, setMobileNav] = useState(false);
   const [repos, setRepos] = useState<Repository[]>([]);
   const [history, setHistory] = useState<Scan[]>([]);
   const [connected, setConnected] = useState<boolean | null>(null);
@@ -78,7 +75,6 @@ export default function App() {
   const [states, setStates] = useState<Record<string, string>>({});
   const [elapsed, setElapsed] = useState(0);
   const controller = useRef<AbortController | null>(null);
-  const activityEnd = useRef<HTMLDivElement>(null);
   const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
       const [r, h] = await Promise.all([
@@ -117,12 +113,6 @@ export default function App() {
     const timer = setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => clearInterval(timer);
   }, [busy]);
-  useEffect(() => {
-    activityEnd.current?.scrollIntoView({
-      block: "nearest",
-      behavior: "instant",
-    });
-  }, [activity]);
 
   function progress(event: ProgressEvent) {
     setStates((s) => ({ ...s, [event.stage]: event.status }));
@@ -256,155 +246,64 @@ export default function App() {
     setView("workspace");
   }
   const hasRun = !!activity.length || !!scan;
-  const title =
-    view === "workspace"
-      ? "Overview"
-      : view === "repositories"
-        ? "Repositories"
-        : "Scan history";
   return (
     <TooltipProvider>
-      <div className="min-h-screen">
-        {mobileNav && (
-          <button
-            className="fixed inset-0 z-40 bg-black/40 md:hidden"
-            aria-label="Close navigation"
-            onClick={() => setMobileNav(false)}
-          />
-        )}
-        <aside
-          className={cn(
-            "fixed inset-y-0 left-0 z-50 flex w-[218px] flex-col overflow-y-auto border-r border-white/5 bg-[#1c222c] text-slate-300 transition-transform md:translate-x-0",
-            mobileNav ? "translate-x-0" : "hidden -translate-x-full md:flex",
-          )}
+      <div className="workspace-shell min-h-screen">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:rounded-md focus:bg-primary focus:p-3 focus:text-primary-foreground"
         >
-          <div className="flex h-[82px] items-center gap-3 px-7">
-            <Logo />
-            <span className="text-xl font-semibold tracking-[.12em] text-white">
-              AEGIS
-            </span>
+          Skip to content
+        </a>
+        <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur-xl">
+          <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-x-8 gap-y-3 px-5 py-4 md:px-9">
             <button
-              className="ml-auto md:hidden"
-              onClick={() => setMobileNav(false)}
-              aria-label="Close navigation"
+              onClick={() => setView("workspace")}
+              aria-label="Aegis overview"
+              className="flex items-center gap-2.5"
             >
-              <X size={17} />
+              <Logo />
+              <span className="text-lg font-semibold tracking-[.16em]">
+                AEGIS
+              </span>
+              <span className="hidden rounded border px-1.5 py-0.5 text-[11px] tracking-wider text-muted-foreground lg:block">
+                WORKSPACE
+              </span>
             </button>
-          </div>
-          <div className="mx-4 mb-7 flex items-center gap-3 rounded-lg border border-white/10 bg-white/[.03] px-3 py-3">
-            <div className="flex size-8 items-center justify-center rounded-md bg-white/10">
-              <Boxes size={16} />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-100">
-                Local workspace
-              </p>
-              <p className="mt-0.5 text-[10px] text-slate-500">
-                Repository intelligence
-              </p>
-            </div>
-          </div>
-          <p className="mb-3 px-7 text-[9px] font-semibold uppercase tracking-[.18em] text-slate-500">
-            Workspace
-          </p>
-          <nav aria-label="Main navigation" className="space-y-1 px-3">
-            {[
-              { id: "workspace", label: "Overview", icon: LayoutDashboard },
-              { id: "repositories", label: "Repositories", icon: FolderGit2 },
-              { id: "history", label: "Scan history", icon: History },
-            ].map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-lg px-4 py-3 text-xs transition-colors",
-                  view === id
-                    ? "bg-white/[.08] text-white"
-                    : "hover:bg-white/[.04] hover:text-white",
-                )}
-                onClick={() => {
-                  setView(id as View);
-                  setMobileNav(false);
-                }}
-              >
-                <Icon
-                  size={16}
-                  className={view === id ? "text-[#f49a75]" : "text-slate-500"}
-                />
-                {label}
-                {id === "repositories" && repos.length > 0 && (
-                  <span className="ml-auto rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-slate-400">
-                    {repos.length}
-                  </span>
-                )}
-              </button>
-            ))}
-          </nav>
-          <div className="mx-6 mt-9 border-t border-white/10 pt-6">
-            <p className="mb-4 text-[9px] font-semibold uppercase tracking-[.16em] text-slate-500">
-              Connected intelligence
-            </p>
-            {[
-              ["Source & dependencies", Code2],
-              ["Advisory evidence", Shield],
-              ["Contextual priorities", Sparkles],
-            ].map(([label, Icon]) => {
-              const I = Icon as typeof Code2;
-              return (
-                <p
-                  key={label as string}
-                  className="mb-4 flex items-center gap-3 text-[11px] text-slate-400"
+            <nav
+              aria-label="Main navigation"
+              className="order-3 flex w-full gap-1 border-t pt-3 sm:order-none sm:w-auto sm:border-0 sm:pt-0"
+            >
+              {[
+                { id: "workspace", label: "Overview", icon: LayoutDashboard },
+                { id: "repositories", label: "Repositories", icon: FolderGit2 },
+                { id: "history", label: "Scan history", icon: History },
+              ].map(({ id, label, icon: Icon }) => (
+                <Button
+                  key={id}
+                  variant="ghost"
+                  size="sm"
+                  aria-current={view === id ? "page" : undefined}
+                  className={cn(
+                    "flex-1 gap-2 text-xs sm:flex-none",
+                    view === id
+                      ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                      : "text-muted-foreground",
+                  )}
+                  onClick={() => setView(id as View)}
                 >
-                  <I size={13} className="text-slate-600" />
-                  {label as string}
-                </p>
-              );
-            })}
-          </div>
-          <div className="mt-auto px-5 pb-5">
-            <div className="mb-5 rounded-lg border border-white/10 p-4">
-              <div className="mb-2 flex items-center gap-2 text-xs text-slate-200">
-                <Workflow size={14} className="text-[#f49a75]" />
-                Evidence, end to end.
-              </div>
-              <p className="text-[10px] leading-5 text-slate-500">
-                Every finding connects back to a dependency, an advisory, and
-                its context.
-              </p>
-            </div>
-            <div className="flex items-center gap-2.5 border-t border-white/10 pt-4">
-              <div className="flex size-8 items-center justify-center rounded-full bg-[#35404c] text-xs font-semibold text-white">
-                A
-              </div>
-              <div>
-                <p className="text-xs text-slate-200">Your workspace</p>
-                <p className="mt-0.5 text-[10px] text-slate-500">
-                  Local development
-                </p>
-              </div>
-            </div>
-          </div>
-        </aside>
-        <div className="md:ml-[218px]">
-          <header className="flex h-[72px] items-center justify-between gap-3 border-b bg-white/70 px-5 md:px-9">
-            <div className="flex items-center gap-2 text-xs">
-              <button
-                className="mr-2 md:hidden"
-                aria-label="Open navigation"
-                onClick={() => setMobileNav(true)}
-              >
-                <Menu size={20} />
-              </button>
-              <span className="text-muted-foreground">Workspace</span>
-              <ChevronRight size={12} className="text-slate-400" />
-              <span className="font-medium">{title}</span>
-            </div>
-            <div className="flex items-center gap-4">
+                  <Icon size={15} />
+                  {label}
+                </Button>
+              ))}
+            </nav>
+            <div className="ml-auto flex items-center gap-3">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     onClick={() => void refresh()}
-                    className="flex items-center gap-2 text-[11px] text-muted-foreground"
                     aria-label="Refresh backend connection"
+                    className="flex items-center gap-2 rounded-full border bg-card px-3 py-2 text-[11px] text-muted-foreground"
                   >
                     <span
                       className={cn(
@@ -412,11 +311,11 @@ export default function App() {
                         connected == null
                           ? "animate-pulse bg-slate-400"
                           : connected
-                            ? "bg-emerald-500"
-                            : "bg-amber-500",
+                            ? "bg-emerald-400"
+                            : "bg-amber-400",
                       )}
                     />
-                    <span className="hidden sm:inline">
+                    <span className="hidden md:inline">
                       {connected == null
                         ? "Connecting"
                         : connected
@@ -429,22 +328,22 @@ export default function App() {
                   Refresh repositories and saved scans
                 </TooltipContent>
               </Tooltip>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 gap-1.5 text-xs"
-                onClick={newScan}
-              >
+              <Button size="sm" className="text-xs" onClick={newScan}>
                 <Plus size={14} />
                 New scan
               </Button>
             </div>
-          </header>
-          <main className="mx-auto max-w-[1480px] space-y-7 px-5 py-8 md:px-9 lg:py-10">
+          </div>
+        </header>
+        <div>
+          <main
+            id="main-content"
+            className="mx-auto max-w-[1380px] space-y-8 px-5 py-8 md:px-9 lg:py-10"
+          >
             {loadError && (
               <div
                 role="status"
-                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-400/20 bg-amber-500/10 p-4 text-xs text-amber-300"
               >
                 <span>{loadError}</span>
                 <Button
@@ -459,32 +358,33 @@ export default function App() {
             )}
             {view === "workspace" ? (
               <>
-                <PatchDemoView />
                 {!hasRun && (
-                  <section className="relative flex min-h-[206px] items-center justify-between overflow-hidden pb-4">
+                  <section className="relative flex min-h-[250px] items-center justify-between overflow-hidden pb-4">
                     <div className="relative z-10 max-w-xl">
-                      <p className="mb-4 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.18em] text-primary">
+                      <p className="mb-4 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.18em] text-primary">
                         <span className="size-1.5 rounded-full bg-primary" />
-                        Clarity starts with your code
+                        YOUR SECURITY CONTROL ROOM
                       </p>
-                      <h1 className="text-balance text-[36px] font-semibold leading-[1.15] tracking-[-.045em] sm:text-[43px]">
-                        Know your code.
+                      <h1 className="text-balance text-[40px] font-semibold leading-[1.15] tracking-[-.045em] sm:text-[54px]">
+                        Less noise.
                         <br />
-                        <span className="text-[#89909b]">
-                          Understand your risk.
-                        </span>
+                        <span className="text-primary">More certainty.</span>
                       </h1>
                       <p className="mt-4 max-w-[425px] text-sm leading-6 text-muted-foreground">
-                        From repository to prioritized findings. See what Aegis
-                        discovers, how it connects, and why it matters.
+                        Understand your dependencies, investigate real threats,
+                        and watch your agents build a safer codebase. Every
+                        step, in view.
                       </p>
                     </div>
                     <div className="relative hidden h-[190px] w-[315px] shrink-0 xl:block">
                       <div className="hero-grid absolute inset-[-20px]" />
-                      <div className="absolute left-5 top-7 z-10 flex items-center gap-3 rounded-xl border bg-white px-4 py-3 shadow-sm">
-                        <FolderGit2 className="text-slate-500" size={20} />
+                      <div className="absolute left-5 top-7 z-10 flex items-center gap-3 rounded-xl border bg-card px-4 py-3 shadow-sm">
+                        <FolderGit2
+                          className="text-muted-foreground"
+                          size={20}
+                        />
                         <div>
-                          <p className="text-[9px] uppercase tracking-widest text-muted-foreground">
+                          <p className="text-[11px] uppercase tracking-widest text-muted-foreground">
                             Your repository
                           </p>
                           <p className="mono mt-1 text-xs">
@@ -492,14 +392,14 @@ export default function App() {
                           </p>
                         </div>
                       </div>
-                      <div className="absolute left-[82px] top-[80px] h-7 border-l border-dashed border-slate-300" />
-                      <div className="absolute left-[58px] top-[102px] z-20 flex items-center gap-3 rounded-xl border border-orange-200 bg-[#fff9f4] px-4 py-3 shadow-sm">
+                      <div className="absolute left-[82px] top-[80px] h-7 border-l border-dashed border-border" />
+                      <div className="absolute left-[58px] top-[102px] z-20 flex items-center gap-3 rounded-xl border border-orange-400/20 bg-primary/10 px-4 py-3 shadow-sm">
                         <Sparkles className="text-primary" size={18} />
                         <div>
                           <p className="text-xs font-semibold">
                             Connected intelligence
                           </p>
-                          <p className="mt-1 text-[10px] text-muted-foreground">
+                          <p className="mt-1 text-[11px] text-muted-foreground">
                             Discover. Enrich. Prioritize.
                           </p>
                         </div>
@@ -511,7 +411,7 @@ export default function App() {
                 {hasRun && (
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[.16em] text-primary">
+                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-[.16em] text-primary">
                         Repository workspace
                       </p>
                       <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
@@ -545,7 +445,7 @@ export default function App() {
                     )}
                   </div>
                 )}
-                <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+                <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
                   <Card className="gap-0 overflow-hidden shadow-[0_2px_8px_#17213303]">
                     <CardContent className="p-6">
                       <div className="mb-5 flex items-center gap-3">
@@ -556,7 +456,7 @@ export default function App() {
                           <h2 className="text-sm font-semibold">
                             {hasRun
                               ? "Scan configuration"
-                              : "Start with a repository"}
+                              : "Start a security analysis"}
                           </h2>
                           <p className="mt-1 text-xs text-muted-foreground">
                             Public GitHub repositories · Python, Node.js & Java
@@ -564,7 +464,7 @@ export default function App() {
                         </div>
                         <Badge
                           variant="secondary"
-                          className="ml-auto hidden text-[10px] sm:inline-flex"
+                          className="ml-auto hidden text-[11px] sm:inline-flex"
                         >
                           Read-only inspection
                         </Badge>
@@ -629,7 +529,7 @@ export default function App() {
                               </label>
                               <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
                                 Architecture insights & contextual priority.
-                                Requires a configured host API key.
+                                Uses your configured AI provider.
                               </p>
                             </div>
                           </div>
@@ -649,8 +549,9 @@ export default function App() {
                                 Resolve dependency graph
                               </label>
                               <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                                Optional offline dependency graph resolution in Docker. Uncached
-                                dependencies may remain unresolved.
+                                Retrieve the cached dependency graph in Docker
+                                and inspect command output. Uncached packages
+                                are reported.
                               </p>
                             </div>
                           </div>
@@ -667,7 +568,7 @@ export default function App() {
                       {error && (
                         <div
                           role="alert"
-                          className="mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs leading-5 text-red-800"
+                          className="mt-4 flex items-start gap-2 rounded-lg border border-red-400/20 bg-red-500/10 p-3 text-xs leading-5 text-red-300"
                         >
                           <CircleAlert size={15} className="mt-0.5 shrink-0" />
                           {error}
@@ -676,7 +577,7 @@ export default function App() {
                     </CardContent>
                     {!hasRun && (
                       <div className="border-t bg-muted/30 px-6 py-4">
-                        <p className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        <p className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                           Try an example{" "}
                           <span className="font-normal normal-case tracking-normal">
                             Real security learning repositories
@@ -688,9 +589,9 @@ export default function App() {
                               disabled={busy}
                               key={e.name}
                               className={cn(
-                                "group rounded-lg border bg-white p-3 text-left transition-colors hover:border-orange-300",
+                                "group rounded-lg border bg-card p-3 text-left transition-colors hover:border-orange-400/20",
                                 url === e.url &&
-                                  "border-orange-300 bg-orange-50/40",
+                                  "border-orange-400/20 bg-orange-500/10",
                               )}
                               onClick={() => {
                                 setUrl(e.url);
@@ -703,10 +604,10 @@ export default function App() {
                                 </span>
                                 <ArrowUpRight className="size-3 text-muted-foreground group-hover:text-primary" />
                               </div>
-                              <p className="mt-1 text-[10px] text-muted-foreground">
+                              <p className="mt-1 text-[11px] text-muted-foreground">
                                 {e.owner}
                               </p>
-                              <p className="mt-3 flex items-center gap-1.5 text-[10px]">
+                              <p className="mt-3 flex items-center gap-1.5 text-[11px]">
                                 <span
                                   className="size-1.5 rounded-full"
                                   style={{ background: e.color }}
@@ -720,58 +621,16 @@ export default function App() {
                     )}
                   </Card>
                   {hasRun ? (
-                    <Card className="gap-0 shadow-none">
-                      <CardContent className="p-5">
-                        <div className="mb-4 flex items-center justify-between">
-                          <h2 className="flex items-center gap-2 text-xs font-semibold">
-                            <ActivityIcon size={14} />
-                            Live activity
-                          </h2>
-                          {busy && (
-                            <span className="flex items-center gap-1.5 text-[9px] font-medium text-emerald-700">
-                              <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
-                              LIVE
-                            </span>
-                          )}
-                        </div>
-                        <div
-                          className="max-h-[274px] space-y-4 overflow-auto pr-1"
-                          role="log"
-                          aria-label="Pipeline activity"
-                          aria-live="polite"
-                        >
-                          {activity.length ? (
-                            activity.map((a, i) => (
-                              <div key={i} className="flex gap-2.5">
-                                <div className="mt-0.5 shrink-0">
-                                  <StageIcon status={a.status} />
-                                </div>
-                                <div>
-                                  <p className="text-[11px] leading-5 text-slate-600">
-                                    {a.message}
-                                  </p>
-                                  <p className="mt-1 text-[9px] text-slate-400">
-                                    {a.time}
-                                  </p>
-                                </div>
-                              </div>
-                            ))
-                          ) : (
-                            <p className="text-xs leading-6 text-muted-foreground">
-                              This is a saved result. Its evidence is preserved
-                              below; live stage activity is shown during new
-                              runs.
-                            </p>
-                          )}
-                          <div ref={activityEnd} />
-                        </div>
-                      </CardContent>
-                    </Card>
+                    <AgentActivity
+                      events={activity}
+                      running={busy}
+                      label="Pipeline activity"
+                    />
                   ) : (
                     <Card className="gap-0 border-dashed bg-transparent shadow-none">
                       <CardContent className="p-6">
-                        <p className="mb-5 text-[10px] font-semibold uppercase tracking-[.15em] text-muted-foreground">
-                          One connected workflow
+                        <p className="mb-5 text-[11px] font-semibold uppercase tracking-[.15em] text-muted-foreground">
+                          From discovery to verification
                         </p>
                         {[
                           {
@@ -795,10 +654,10 @@ export default function App() {
                             className={cn(
                               "relative flex gap-3 pb-5",
                               i < 2 &&
-                                "before:absolute before:left-[14px] before:top-9 before:h-6 before:border-l before:border-dashed before:border-slate-300",
+                                "before:absolute before:left-[14px] before:top-9 before:h-6 before:border-l before:border-dashed before:border-border",
                             )}
                           >
-                            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-white">
+                            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-card">
                               <Icon
                                 size={13}
                                 className="text-muted-foreground"
@@ -822,7 +681,7 @@ export default function App() {
                       <Workflow size={15} className="text-muted-foreground" />
                       The connected pipeline
                     </h2>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-[11px] text-muted-foreground">
                       {busy
                         ? "Stages update as the backend runs"
                         : "Source to evidence to priority"}
@@ -833,22 +692,22 @@ export default function App() {
                       <div
                         key={s.id}
                         className={cn(
-                          "relative min-w-0 rounded-lg border bg-white p-3",
+                          "relative min-w-0 rounded-lg border bg-card p-3",
                           states[s.id] === "running" &&
-                            "border-orange-300 bg-orange-50/40",
+                            "border-orange-400/20 bg-orange-500/10",
                           ["partial", "failed", "unavailable"].includes(
                             states[s.id],
-                          ) && "border-amber-200",
+                          ) && "border-amber-400/20",
                         )}
                       >
                         <div className="mb-3 flex items-center justify-between">
-                          <span className="mono text-[10px] text-slate-400">
+                          <span className="mono text-[11px] text-muted-foreground">
                             {String(i + 1).padStart(2, "0")}
                           </span>
                           <StageIcon status={states[s.id] || "pending"} />
                         </div>
                         <p className="text-[11px] font-semibold">{s.title}</p>
-                        <p className="mt-1 text-[9px] leading-4 text-muted-foreground">
+                        <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
                           {states[s.id]
                             ? states[s.id].replaceAll("_", " ")
                             : s.detail}
@@ -857,10 +716,19 @@ export default function App() {
                     ))}
                   </div>
                 </section>
+                {hasRun && (
+                  <ExecutionPanel
+                    events={activity}
+                    results={analysis?.execution_results}
+                    running={busy}
+                    enabled={resolve || !!analysis?.execution_results?.length}
+                  />
+                )}
                 {analysis && <AnalysisView analysis={analysis} />}
                 {scan && <ResultsView key={scan.id} scan={scan} />}
+                <PatchDemoView />
                 {!hasRun && (
-                  <div className="flex flex-wrap items-center gap-5 border-t pt-5 text-[10px] text-slate-400">
+                  <div className="flex flex-wrap items-center gap-5 border-t pt-5 text-[11px] text-muted-foreground">
                     <span className="flex items-center gap-1.5">
                       <Shield size={12} />
                       Evidence-backed findings
@@ -1003,7 +871,7 @@ export default function App() {
               </section>
             )}
           </main>
-          <footer className="flex items-center justify-between px-5 py-5 text-[10px] text-slate-400 md:px-9">
+          <footer className="flex items-center justify-between px-5 py-5 text-[11px] text-muted-foreground md:px-9">
             <span>Aegis / Repository intelligence</span>
             <span>Inspect with confidence. Act with context.</span>
           </footer>
@@ -1018,10 +886,10 @@ function Logo() {
       className="relative grid size-7 grid-cols-2 gap-[3px]"
       aria-hidden="true"
     >
-      <span className="rounded-tl-md bg-[#ee986f]" />
-      <span className="rounded-tr-md bg-[#f7c7af]" />
-      <span className="rounded-bl-md bg-[#f7c7af]" />
-      <span className="rounded-br-md bg-[#ee986f]" />
+      <span className="rounded-tl-md bg-primary" />
+      <span className="rounded-tr-md bg-primary/50" />
+      <span className="rounded-bl-md bg-primary/50" />
+      <span className="rounded-br-md bg-primary" />
     </div>
   );
 }
@@ -1029,11 +897,11 @@ function StageIcon({ status }: { status: string }) {
   return status === "running" ? (
     <LoaderCircle size={13} className="animate-spin text-primary" />
   ) : status === "completed" ? (
-    <Check size={13} className="text-emerald-600" />
+    <Check size={13} className="text-emerald-300" />
   ) : ["partial", "failed", "unavailable"].includes(status) ? (
-    <CircleAlert size={13} className="text-amber-600" />
+    <CircleAlert size={13} className="text-amber-300" />
   ) : status === "skipped" || status === "not_run" ? (
-    <span className="text-xs leading-3 text-slate-400">-</span>
+    <span className="text-xs leading-3 text-muted-foreground">-</span>
   ) : (
     <Circle size={12} className="text-slate-300" />
   );

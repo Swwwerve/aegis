@@ -5,6 +5,7 @@ from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
+from .execution import ExecutionLog
 
 
 class RepositoryCreate(BaseModel):
@@ -91,6 +92,7 @@ class ImportantDirectory(BaseModel):
 
 
 class RepositoryAnalysis(BaseModel):
+    execution_results: list[ExecutionLog] = Field(default_factory=list)
     schema_version: int = 1
     languages: dict[str, int] = Field(
         default_factory=dict, description="Source file counts, not byte percentages"

@@ -19,10 +19,10 @@ export function StateBadge({ status }: { status: string }) {
       className={cn(
         "rounded-md border-transparent font-medium capitalize",
         status === "completed"
-          ? "bg-emerald-50 text-emerald-700"
+          ? "bg-emerald-500/10 text-emerald-300"
           : ["failed", "unavailable", "partial"].includes(status)
-            ? "bg-amber-50 text-amber-800"
-            : "bg-slate-100 text-slate-600",
+            ? "bg-amber-500/10 text-amber-300"
+            : "bg-muted text-muted-foreground",
       )}
     >
       {status.replaceAll("_", " ")}
@@ -80,7 +80,7 @@ export function AnalysisView({ analysis }: { analysis: Analysis }) {
                 Architecture insight{" "}
                 <StateBadge status={analysis.inference_status} />
               </div>
-              <p className="whitespace-pre-wrap text-sm leading-7 text-slate-600">
+              <p className="whitespace-pre-wrap text-sm leading-7 text-muted-foreground">
                 {analysis.summary}
               </p>
             </div>
@@ -88,7 +88,7 @@ export function AnalysisView({ analysis }: { analysis: Analysis }) {
         </Card>
       )}
       <Tabs defaultValue="projects">
-        <TabsList className="mb-3 h-10 bg-[#ebedf1]">
+        <TabsList className="mb-3 h-10 bg-muted">
           <TabsTrigger value="projects">Projects</TabsTrigger>
           <TabsTrigger value="commands">
             Build & test{" "}
@@ -160,7 +160,7 @@ export function AnalysisView({ analysis }: { analysis: Analysis }) {
                   ))}
                   {project.warnings.map((w, i) => (
                     <p
-                      className="mt-3 text-xs leading-5 text-amber-800"
+                      className="mt-3 text-xs leading-5 text-amber-300"
                       key={i}
                     >
                       {w}
@@ -197,11 +197,11 @@ export function AnalysisView({ analysis }: { analysis: Analysis }) {
                       <p className="text-xs text-muted-foreground">
                         Directory: {command.cwd} · Evidence: {command.source}
                       </p>
-                      <p className="mt-2 text-sm text-slate-600">
+                      <p className="mt-2 text-sm text-muted-foreground">
                         {command.reason}
                       </p>
                       {command.requires_network && (
-                        <p className="mt-2 text-xs text-amber-800">
+                        <p className="mt-2 text-xs text-amber-300">
                           Requires network access
                         </p>
                       )}
@@ -229,7 +229,9 @@ export function AnalysisView({ analysis }: { analysis: Analysis }) {
                     />
                     <div>
                       <p className="mono text-sm font-semibold">{d.path}</p>
-                      <p className="mt-1 text-sm text-slate-600">{d.role}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {d.role}
+                      </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {d.evidence}
                       </p>
@@ -309,11 +311,11 @@ export function AnalysisView({ analysis }: { analysis: Analysis }) {
         </TabsContent>
       </Tabs>
       {!!analysis.warnings.length && (
-        <details className="rounded-lg border border-amber-200 bg-amber-50/40 p-4 text-sm">
-          <summary className="cursor-pointer font-medium text-amber-900">
+        <details className="rounded-lg border border-amber-400/20 bg-amber-500/10 p-4 text-sm">
+          <summary className="cursor-pointer font-medium text-amber-300">
             Inventory notes ({analysis.warnings.length})
           </summary>
-          <ul className="mt-3 space-y-2 text-xs leading-5 text-amber-900">
+          <ul className="mt-3 space-y-2 text-xs leading-5 text-amber-300">
             {analysis.warnings.map((w, i) => (
               <li key={i}>{w}</li>
             ))}

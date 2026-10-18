@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, Play, Square } from "lucide-react";
+import { AgentActivity } from "./ai-elements/agent-activity";
+import { ExecutionPanel } from "./ai-elements/execution-panel";
 import { Button } from "@/components/ui/button";
 import { getPatchDemoStatus, streamPatchDemo } from "@/lib/api";
 import type { PatchDemoStatus, PatchResult, ProgressEvent } from "@/lib/types";
@@ -17,7 +19,10 @@ export function PatchDemoView() {
     void getPatchDemoStatus(abort.signal)
       .then(setAvailable)
       .catch(() => setAvailable(null));
-    return () => abort.abort();
+    return () => {
+      abort.abort();
+      controller.current?.abort();
+    };
   }, []);
 
   async function run() {
@@ -53,11 +58,11 @@ export function PatchDemoView() {
   return (
     <section
       aria-label="Patch Agent sandbox demonstration"
-      className="rounded-lg border border-dashed border-orange-300 bg-orange-50/50 p-5"
+      className="rounded-lg border border-dashed border-orange-400/20 bg-orange-500/10 p-5"
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-orange-700">
+          <p className="text-[11px] font-semibold uppercase tracking-[.16em] text-orange-300">
             Development demonstration
           </p>
           <h2 className="mt-1 text-lg font-semibold">
@@ -88,20 +93,21 @@ export function PatchDemoView() {
         )}
       </div>
       {(events.length > 0 || result || error) && (
-        <div className="mt-4 space-y-3 rounded-md border bg-white p-3 text-xs">
+        <div className="mt-4 space-y-3 rounded-md border bg-card p-3 text-xs">
           <h3 className="font-semibold">Live Patch Agent activity</h3>
-          <ol className="max-h-48 space-y-1 overflow-auto">
-            {events.map((event, index) => (
-              <li key={`${event.tool || event.stage}-${index}`}>
-                <span className="mono text-muted-foreground">
-                  {event.tool || event.stage}
-                </span>{" "}
-                {event.message}
-              </li>
-            ))}
-          </ol>
+          <AgentActivity
+            events={events}
+            running={running}
+            label="Live Patch Agent activity"
+          />
+          <ExecutionPanel
+            events={events}
+            results={result?.execution_results}
+            running={running}
+            validation
+          />
           {error && (
-            <p role="alert" className="text-amber-800">
+            <p role="alert" className="text-amber-300">
               {error}
             </p>
           )}
@@ -110,7 +116,9 @@ export function PatchDemoView() {
               <p className="font-semibold">
                 Demo result: {result.status.replaceAll("_", " ")}
               </p>
-              <p>Modified files: {result.modified_files.join(", ") || "none"}</p>
+              <p>
+                Modified files: {result.modified_files.join(", ") || "none"}
+              </p>
               <p>Commands executed: {result.commands_executed.length}</p>
               <p className="text-muted-foreground">
                 The temporary fixture was deleted after artifact export.

@@ -10,6 +10,8 @@ from agents.models.interface import Model
 from pydantic import BaseModel, Field
 
 from ..schemas.remediation import RemediationPlan
+from ..schemas.repository import CommandPlan
+from ..sandbox.executor import SandboxExecutor
 
 
 class PatchAgentReport(BaseModel):
@@ -37,7 +39,13 @@ class PatchTools:
     """Deterministic tools backed by one restricted SandboxWorkspace."""
 
     def __init__(
-        self, workspace, plan: RemediationPlan, *, progress=None, run_id=None, demonstration=False
+        self,
+        workspace,
+        plan: RemediationPlan,
+        *,
+        progress=None,
+        run_id=None,
+        demonstration=False,
     ):
         self.workspace = workspace
         self.plan = plan
@@ -48,6 +56,26 @@ class PatchTools:
         self.authorized.update(path for step in plan.steps for path in step.paths)
         self.executed: list[list[str]] = []
         self.errors: list[str] = []
+        self.executor = SandboxExecutor(
+            workspace, progress=progress, phase="validation"
+        )
+
+    async def validate(self, argv: list[str], cwd: str):
+        result = await self.executor.execute(
+            CommandPlan(
+                kind="test",
+                argv=argv,
+                cwd=cwd,
+                source="Remediation plan",
+                origin="declared",
+            )
+        )
+        self.executed.append(argv)
+        if result.status != "passed":
+            self.errors.append(
+                f"Validation {result.status}: {' '.join(argv)} ({result.reason or result.exit_code})"
+            )
+        return result
 
     async def _activity(self, tool: str, message: str) -> None:
         if self.progress:
@@ -63,7 +91,9 @@ class PatchTools:
             )
 
     def _allowed_command(self, argv: list[str], cwd: str) -> bool:
-        return any(check.argv == argv and check.cwd == cwd for check in self.plan.validation)
+        return any(
+            check.argv == argv and check.cwd == cwd for check in self.plan.validation
+        )
 
     def tools(self):
         @function_tool
@@ -81,7 +111,9 @@ class PatchTools:
                     continue
                 for line_number, line in enumerate(content.splitlines(), 1):
                     if needle in line.casefold():
-                        matches.append({"path": path, "line": line_number, "content": line})
+                        matches.append(
+                            {"path": path, "line": line_number, "content": line}
+                        )
             return json.dumps(matches[:100])
 
         @function_tool
@@ -91,15 +123,26 @@ class PatchTools:
             path = _safe_path(path, self.authorized)
             if start < 1 or end < start or end - start > 400:
                 return json.dumps({"error": "Invalid line range"})
-            lines = (await self.workspace.read_file(path)).decode(
-                "utf-8", errors="replace"
-            ).splitlines()
-            return json.dumps({"path": path, "start": start, "end": end, "content": lines[start - 1 : end]})
+            lines = (
+                (await self.workspace.read_file(path))
+                .decode("utf-8", errors="replace")
+                .splitlines()
+            )
+            return json.dumps(
+                {
+                    "path": path,
+                    "start": start,
+                    "end": end,
+                    "content": lines[start - 1 : end],
+                }
+            )
 
         @function_tool
         async def apply_patch(path: str, patch: str) -> str:
             """Apply a unified diff only to an authorized file."""
-            await self._activity("apply_patch", f"Applying an authorized patch to {path}.")
+            await self._activity(
+                "apply_patch", f"Applying an authorized patch to {path}."
+            )
             path = _safe_path(path, self.authorized)
             names = re.findall(r"^(?:\+\+\+|---) [ab]/(.+)$", patch, re.MULTILINE)
             if not names or any(name != path for name in names):
@@ -111,19 +154,32 @@ class PatchTools:
                     "git", "-C", "/workspace/repo", "apply", "--check", patch_path
                 )
                 if result.exit_code:
-                    return json.dumps({"error": result.stderr.decode(errors="replace")[:1000]})
+                    return json.dumps(
+                        {"error": result.stderr.decode(errors="replace")[:1000]}
+                    )
                 result = await self.workspace.exec(
-                    "git", "-C", "/workspace/repo", "apply", "--whitespace=nowarn", patch_path
+                    "git",
+                    "-C",
+                    "/workspace/repo",
+                    "apply",
+                    "--whitespace=nowarn",
+                    patch_path,
                 )
                 if result.exit_code:
-                    return json.dumps({"error": result.stderr.decode(errors="replace")[:1000]})
+                    return json.dumps(
+                        {"error": result.stderr.decode(errors="replace")[:1000]}
+                    )
                 self.executed.append(["git", "apply", path])
                 return json.dumps({"applied": path})
             finally:
-                await self.workspace.exec("rm", "-f", "/workspace/repo/.aegis-patch.diff")
+                await self.workspace.exec(
+                    "rm", "-f", "/workspace/repo/.aegis-patch.diff"
+                )
 
         @function_tool
-        async def update_dependency(package: str, from_version: str, to_version: str) -> str:
+        async def update_dependency(
+            package: str, from_version: str, to_version: str
+        ) -> str:
             """Update only a confirmed package/version in an authorized manifest."""
             await self._activity(
                 "update_dependency",
@@ -137,7 +193,9 @@ class PatchTools:
                 and change.proposed_version == to_version
             ]
             if not changes:
-                return json.dumps({"error": "Dependency change is not authorized by the plan"})
+                return json.dumps(
+                    {"error": "Dependency change is not authorized by the plan"}
+                )
             changed = []
             for manifest in sorted(self.authorized):
                 if not any(manifest in step.paths for step in self.plan.steps):
@@ -165,25 +223,33 @@ class PatchTools:
                     await self.workspace.write_file(manifest, updated.encode())
                     changed.append(manifest)
             if not changed:
-                return json.dumps({"error": "Confirmed dependency declaration was not found"})
+                return json.dumps(
+                    {"error": "Confirmed dependency declaration was not found"}
+                )
             self.executed.append(["update_dependency", package, to_version])
             return json.dumps({"updated": changed})
 
         @function_tool
         async def run_command(argv: list[str], cwd: str = ".") -> str:
             """Run only a declared validation command in the restricted sandbox."""
-            await self._activity("run_command", f"Running declared command: {' '.join(argv)}")
+            await self._activity(
+                "run_command", f"Running declared command: {' '.join(argv)}"
+            )
             if not self._allowed_command(argv, cwd):
-                return json.dumps({"error": "Command is not declared by the remediation plan"})
+                return json.dumps(
+                    {"error": "Command is not declared by the remediation plan"}
+                )
             if not argv or any(not isinstance(item, str) or not item for item in argv):
                 return json.dumps({"error": "Invalid command"})
-            result = await self.workspace.exec(*argv, timeout=self.workspace.policy.command_timeout_seconds)
-            self.executed.append(argv)
-            return json.dumps({
-                "exit_code": result.exit_code,
-                "stdout": result.stdout.decode("utf-8", errors="replace")[:4000],
-                "stderr": result.stderr.decode("utf-8", errors="replace")[:4000],
-            })
+            result = await self.validate(argv, cwd)
+            return json.dumps(
+                {
+                    "exit_code": result.exit_code,
+                    "status": result.status,
+                    "stdout": result.stdout[:4000],
+                    "stderr": result.stderr[:4000],
+                }
+            )
 
         @function_tool
         async def git_diff() -> str:
@@ -195,12 +261,21 @@ class PatchTools:
             status = await self.workspace.exec(
                 "git", "-C", "/workspace/repo", "status", "--short"
             )
-            return json.dumps({
-                "diff": diff.stdout.decode("utf-8", errors="replace")[:20000],
-                "status": status.stdout.decode("utf-8", errors="replace")[:4000],
-            })
+            return json.dumps(
+                {
+                    "diff": diff.stdout.decode("utf-8", errors="replace")[:20000],
+                    "status": status.stdout.decode("utf-8", errors="replace")[:4000],
+                }
+            )
 
-        return [search_code, read_file, apply_patch, update_dependency, run_command, git_diff]
+        return [
+            search_code,
+            read_file,
+            apply_patch,
+            update_dependency,
+            run_command,
+            git_diff,
+        ]
 
 
 def make_patch_agent(

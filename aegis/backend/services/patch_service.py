@@ -53,7 +53,9 @@ async def patch_remediation(
         return base
     if not plan.version_changes and not plan.application_code_changes:
         base.status = "needs_context"
-        base.errors.append("Plan contains no authorized dependency or application change")
+        base.errors.append(
+            "Plan contains no authorized dependency or application change"
+        )
         base.human_intervention_required = True
         return base
     if isinstance(model, str) and settings.openai_api_key is None:
@@ -72,7 +74,15 @@ async def patch_remediation(
             run_id=run_id,
             demonstration=demonstration,
         )
-        await emit(progress, "patch_agent", "running", "Starting sandbox patch execution", run_id=run_id)
+        base.execution_results = tools.executor.execution_results
+        base.commands_executed = tools.executed
+        await emit(
+            progress,
+            "patch_agent",
+            "running",
+            "Starting sandbox patch execution",
+            run_id=run_id,
+        )
         if isinstance(model, str):
             client = AsyncOpenAI(api_key=settings.openai_api_key.get_secret_value())
             model = OpenAIResponsesModel(model=model, openai_client=client)
@@ -98,6 +108,15 @@ async def patch_remediation(
             timeout=workspace.policy.agent_timeout_seconds,
         )
         report = result.final_output
+        # Always run every declared check, even when the model omits a tool call.
+        # Keep cwd in the identity: monorepos may share the same test argv.
+        checked = {
+            (tuple(log.argv), log.cwd) for log in tools.executor.execution_results
+        }
+        for check in plan.validation:
+            if (tuple(check.argv), check.cwd) not in checked:
+                await tools.validate(check.argv, check.cwd)
+                checked.add((tuple(check.argv), check.cwd))
         artifact_dir = Path(tempfile.mkdtemp(prefix="aegis-patch-"))
         await workspace.export_results(artifact_dir)
         status = await workspace.exec(
@@ -114,13 +133,19 @@ async def patch_remediation(
         unexpected = sorted(set(modified) - allowed)
         if unexpected:
             base.errors.append(f"Unexpected files changed: {', '.join(unexpected)}")
-            base.unresolved_issues.append("Sandbox patch exceeded the authorized file scope")
+            base.unresolved_issues.append(
+                "Sandbox patch exceeded the authorized file scope"
+            )
             base.human_intervention_required = True
-        base.status = "completed" if report.status == "completed" and not base.errors else "failed"
+        base.errors.extend(tools.errors)
+        base.status = (
+            "completed"
+            if report.status == "completed" and not base.errors and not report.errors
+            else "failed"
+        )
         base.modified_files = modified
         base.artifact_location = str(artifact_dir)
         base.commands_executed = tools.executed
-        base.errors.extend(tools.errors)
         base.unresolved_issues.extend(report.errors)
         base.further_testing_required = True
         base.dependency_changes = [
@@ -133,7 +158,13 @@ async def patch_remediation(
                     path
                     for path in plan.affected_files
                     if path.endswith(
-                        ("requirements.txt", "package.json", "pom.xml", "build.gradle", "build.gradle.kts")
+                        (
+                            "requirements.txt",
+                            "package.json",
+                            "pom.xml",
+                            "build.gradle",
+                            "build.gradle.kts",
+                        )
                     )
                 ],
             )

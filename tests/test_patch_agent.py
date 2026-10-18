@@ -11,6 +11,8 @@ from aegis.backend.schemas.remediation import (
 )
 from aegis.backend.services.patch_demo import DemoPatchModel, demo_packet, demo_plan
 from aegis.backend.services.patch_service import patch_remediation
+from aegis.backend.sandbox.executor import _LAUNCH, SandboxExecutor
+from aegis.backend.schemas.repository import CommandPlan
 
 
 class FakeWorkspace:
@@ -32,10 +34,14 @@ class FakeWorkspace:
     async def exec(self, *command, timeout=None):
         self.commands.append(command)
         key = tuple(command)
+        if (
+            len(command) > 2
+            and command[:2] == ("python", "-c")
+            and "shutil.which" in command[2]
+        ):
+            return SimpleNamespace(exit_code=0, stdout=b"true", stderr=b"")
         if "--name-only" in command:
-            return SimpleNamespace(
-                exit_code=0, stdout=b"package.json\n", stderr=b""
-            )
+            return SimpleNamespace(exit_code=0, stdout=b"package.json\n", stderr=b"")
         return self.results.get(
             key,
             SimpleNamespace(exit_code=0, stdout=b"", stderr=b""),
@@ -160,7 +166,9 @@ def test_patch_service_blocks_incomplete_plans():
         workspace = FakeWorkspace({"package.json": '{"lodash":"4.17.20"}'})
         return await patch_remediation(
             workspace,
-            make_plan(status="needs_context", missing_context=["Missing caller evidence"]),
+            make_plan(
+                status="needs_context", missing_context=["Missing caller evidence"]
+            ),
             demo_packet(),
             model=DemoPatchModel(),
         )
@@ -169,3 +177,74 @@ def test_patch_service_blocks_incomplete_plans():
     assert result.status == "needs_context"
     assert result.human_intervention_required is True
     assert "Only a ready RemediationPlan can be executed" in result.errors
+
+
+def test_patch_service_runs_omitted_checks_and_preserves_failure_output():
+    async def run():
+        plan = demo_plan()
+        plan.validation = [
+            ProposedCheck(
+                description="Run the project regression suite",
+                argv=["npm", "test"],
+                cwd="packages/api",
+                evidence_ids=["demo-manifest"],
+            )
+        ]
+        workspace = FakeWorkspace(
+            {"package.json": '{"dependencies":{"aegis-demo-package":"1.0.0"}}'},
+            results={
+                (
+                    "python",
+                    "-c",
+                    _LAUNCH,
+                    "packages/api",
+                    "npm",
+                    "test",
+                ): SimpleNamespace(
+                    exit_code=1, stdout=b"1 test failed", stderr=b"assertion failed"
+                ),
+            },
+        )
+        events = []
+
+        async def progress(event):
+            events.append(event)
+
+        result = await patch_remediation(
+            workspace, plan, demo_packet(), model=DemoPatchModel(), progress=progress
+        )
+        return result, events
+
+    result, events = asyncio.run(run())
+    assert result.status == "failed"
+    assert result.modified_files == ["package.json"]
+    assert len(result.execution_results) == 1
+    check = result.execution_results[0]
+    assert check.cwd == "packages/api" and check.exit_code == 1
+    assert check.stdout == "1 test failed" and check.stderr == "assertion failed"
+    assert check.phase == "validation"
+    assert result.errors and result.further_testing_required
+    terminal_events = [event for event in events if event["stage"] == "container"]
+    assert [event["status"] for event in terminal_events] == ["running", "failed"]
+    assert terminal_events[0]["command_id"] == terminal_events[1]["command_id"]
+
+
+def test_executor_bounds_display_logs_without_truncating_resolver_input():
+    async def run():
+        workspace = FakeWorkspace(
+            results={
+                ("python", "-c", _LAUNCH, ".", "npm", "ls"): SimpleNamespace(
+                    exit_code=0, stdout=b"a" * 20000, stderr=b""
+                ),
+            }
+        )
+        executor = SandboxExecutor(workspace)
+        result = await executor.execute(
+            CommandPlan(kind="build", argv=["npm", "ls"], source="package.json")
+        )
+        return result, executor.execution_results
+
+    result, logs = asyncio.run(run())
+    assert len(result.stdout) == 20000
+    assert len(logs[0].stdout) == 16384 and logs[0].truncated
+    assert logs[0].status == "passed" and logs[0].exit_code == 0
