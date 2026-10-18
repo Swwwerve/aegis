@@ -146,7 +146,7 @@ export function AnalysisView({ analysis }: { analysis: Analysis }) {
                       key={i}
                     >
                       <summary className="cursor-pointer">
-                        {r.ecosystem} resolution · {r.status}
+                        {r.ecosystem} dependency graph · {r.status}
                       </summary>
                       <div className="mt-2 text-muted-foreground">
                         {r.method}

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     workspace_root: Path = Path("workspaces")
     analysis_sandbox_image: str = "aegis-sandbox:polyglot"
+    enable_patch_demo: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",

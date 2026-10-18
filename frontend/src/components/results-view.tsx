@@ -318,7 +318,7 @@ export function ResultsView({ scan }: { scan: Scan }) {
                 <p className="mt-2 text-xs text-muted-foreground">
                   {report.advisory_records} advisory records ·{" "}
                   {report.withdrawn_records} withdrawn · model interpretation{" "}
-                  {report.analysis_inference_status} · sandbox resolution{" "}
+                  {report.analysis_inference_status} · dependency graph{" "}
                   {report.analysis_resolution_status}
                 </p>
               </div>

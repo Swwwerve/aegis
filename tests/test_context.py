@@ -428,14 +428,15 @@ def test_unavailable_model_and_unknown_cve_do_not_guess(repository, monkeypatch)
     )
 
 
-def test_large_lines_are_clipped_and_missing_rg_is_explicit(repository):
+def test_large_lines_are_clipped_and_missing_rg_uses_fallback(repository):
     put(repository, "huge.py", "x" * 15000)
     search = CodeSearch(repository, max_lines=1)
     assert search.read_file("huge.py")["truncated"]
     assert search.read_file("app/client.py", 1, 5)["end"] == 1
     search.rg = None
-    with pytest.raises(RetrievalError, match="ripgrep"):
-        search.search_code("danger")
+    result = search.search_code("danger")
+    assert result["matches"][0]["path"] == "app/client.py"
+    assert any("Python search fallback" in warning for warning in result["warnings"])
 
 
 def test_model_failure_timeout_and_final_budget_are_bounded(repository):

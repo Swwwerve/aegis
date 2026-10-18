@@ -1,6 +1,7 @@
 import type {
   ContextPacket,
   PatchResult,
+  PatchDemoStatus,
   RemediationPlan,
   ProgressEvent,
   Repository,
@@ -141,6 +142,22 @@ export async function streamPatch(
   return streamResult<PatchResult>(
     "/remediation/patch/stream",
     { scan_id, cve_id, plan, context },
+    signal,
+    onProgress,
+    onResult,
+  );
+}
+export function getPatchDemoStatus(signal?: AbortSignal) {
+  return get<PatchDemoStatus>("/remediation/demo/status", signal);
+}
+export function streamPatchDemo(
+  signal: AbortSignal,
+  onProgress: (event: ProgressEvent) => void,
+  onResult: (result: PatchResult) => void,
+) {
+  return streamResult<PatchResult>(
+    "/remediation/demo/patch/stream",
+    {},
     signal,
     onProgress,
     onResult,

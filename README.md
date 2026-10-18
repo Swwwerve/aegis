@@ -67,6 +67,21 @@ while the backend runs on port 8000; open **http://127.0.0.1:5173**. Vite proxie
 the same-origin API requests and streams. Restart an already running backend
 after applying these changes. See [frontend/README.md](frontend/README.md) for
 configuration, exact workflow behavior, automated tests and the live browser smoke.
+See [END_TO_END_TESTING.md](END_TO_END_TESTING.md) for the complete local
+backend, frontend, scan, Docker sandbox, and Patch Agent test procedure.
+
+To exercise the Patch Agent without using a real repository, enable the explicitly
+development-only sandbox demonstration before starting the backend:
+
+```powershell
+$env:AEGIS_ENABLE_PATCH_DEMO="true"
+.\.venv\Scripts\python.exe -m uvicorn aegis.backend.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+The workspace page then shows **Run Patch Agent demo**. It creates a temporary
+committed Git fixture, applies a supplied synthetic npm remediation plan inside
+Docker, streams tool activity to the browser, exports the sandbox artifact, and
+deletes the fixture. It never reads or modifies the configured repository.
 
 Choose a real example or submit a public GitHub URL. Existing repositories reuse
 their saved clones. Inspect each stage, open finding evidence, review coverage
@@ -189,7 +204,9 @@ markers and manifests explain the evidence. Constraints, BOM/catalog policy entr
 unresolved ranges and local/git dependencies are not guessed as installed packages.
 Unresolved dependencies remain in `report.unscanned_dependencies`.
 
-Set `resolve_dependencies: true` to run Step 3's offline Docker resolution first.
+Set `resolve_dependencies: true` to run the optional dependency-graph
+resolution stage in the offline Docker sandbox before interpretation and
+vulnerability discovery.
 This requires `aegis-sandbox:polyglot` or a prepared image selected through
 `AEGIS_ANALYSIS_SANDBOX_IMAGE`. The host then performs OSV requests; repository
 code continues to run only inside network-disabled Docker. Only package identifiers

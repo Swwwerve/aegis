@@ -36,13 +36,31 @@ def _safe_path(path: str, authorized: set[str]) -> str:
 class PatchTools:
     """Deterministic tools backed by one restricted SandboxWorkspace."""
 
-    def __init__(self, workspace, plan: RemediationPlan):
+    def __init__(
+        self, workspace, plan: RemediationPlan, *, progress=None, run_id=None, demonstration=False
+    ):
         self.workspace = workspace
         self.plan = plan
+        self.progress = progress
+        self.run_id = run_id
+        self.demonstration = demonstration
         self.authorized = set(plan.affected_files)
         self.authorized.update(path for step in plan.steps for path in step.paths)
         self.executed: list[list[str]] = []
         self.errors: list[str] = []
+
+    async def _activity(self, tool: str, message: str) -> None:
+        if self.progress:
+            await self.progress(
+                {
+                    "stage": "patch_agent",
+                    "status": "running",
+                    "message": message,
+                    "tool": tool,
+                    "run_id": self.run_id,
+                    "demonstration": self.demonstration,
+                }
+            )
 
     def _allowed_command(self, argv: list[str], cwd: str) -> bool:
         return any(check.argv == argv and check.cwd == cwd for check in self.plan.validation)
@@ -51,6 +69,7 @@ class PatchTools:
         @function_tool
         async def search_code(query: str) -> str:
             """Search authorized files inside the sandbox without changing them."""
+            await self._activity("search_code", "Searching authorized sandbox files.")
             needle = query.casefold()
             matches = []
             for path in sorted(self.authorized):
@@ -68,6 +87,7 @@ class PatchTools:
         @function_tool
         async def read_file(path: str, start: int = 1, end: int = 200) -> str:
             """Read a bounded authorized file range."""
+            await self._activity("read_file", f"Reading {path} inside the sandbox.")
             path = _safe_path(path, self.authorized)
             if start < 1 or end < start or end - start > 400:
                 return json.dumps({"error": "Invalid line range"})
@@ -79,6 +99,7 @@ class PatchTools:
         @function_tool
         async def apply_patch(path: str, patch: str) -> str:
             """Apply a unified diff only to an authorized file."""
+            await self._activity("apply_patch", f"Applying an authorized patch to {path}.")
             path = _safe_path(path, self.authorized)
             names = re.findall(r"^(?:\+\+\+|---) [ab]/(.+)$", patch, re.MULTILINE)
             if not names or any(name != path for name in names):
@@ -104,6 +125,10 @@ class PatchTools:
         @function_tool
         async def update_dependency(package: str, from_version: str, to_version: str) -> str:
             """Update only a confirmed package/version in an authorized manifest."""
+            await self._activity(
+                "update_dependency",
+                f"Updating {package} from {from_version} to {to_version}.",
+            )
             changes = [
                 change
                 for change in self.plan.version_changes
@@ -147,6 +172,7 @@ class PatchTools:
         @function_tool
         async def run_command(argv: list[str], cwd: str = ".") -> str:
             """Run only a declared validation command in the restricted sandbox."""
+            await self._activity("run_command", f"Running declared command: {' '.join(argv)}")
             if not self._allowed_command(argv, cwd):
                 return json.dumps({"error": "Command is not declared by the remediation plan"})
             if not argv or any(not isinstance(item, str) or not item for item in argv):
@@ -162,6 +188,7 @@ class PatchTools:
         @function_tool
         async def git_diff() -> str:
             """Return the sandbox git diff and status for review."""
+            await self._activity("git_diff", "Inspecting the sandbox diff and status.")
             diff = await self.workspace.exec(
                 "git", "-C", "/workspace/repo", "diff", "--binary", "HEAD"
             )

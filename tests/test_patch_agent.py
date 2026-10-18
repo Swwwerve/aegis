@@ -9,13 +9,18 @@ from aegis.backend.schemas.remediation import (
     RemediationPlan,
     VersionChange,
 )
+from aegis.backend.services.patch_demo import DemoPatchModel, demo_packet, demo_plan
+from aegis.backend.services.patch_service import patch_remediation
 
 
 class FakeWorkspace:
     def __init__(self, files=None, results=None):
         self.files = {key: value.encode() for key, value in (files or {}).items()}
         self.results = results or {}
-        self.policy = SimpleNamespace(command_timeout_seconds=5)
+        self.policy = SimpleNamespace(
+            command_timeout_seconds=5,
+            agent_timeout_seconds=30,
+        )
         self.commands = []
 
     async def read_file(self, path):
@@ -27,10 +32,17 @@ class FakeWorkspace:
     async def exec(self, *command, timeout=None):
         self.commands.append(command)
         key = tuple(command)
+        if "--name-only" in command:
+            return SimpleNamespace(
+                exit_code=0, stdout=b"package.json\n", stderr=b""
+            )
         return self.results.get(
             key,
             SimpleNamespace(exit_code=0, stdout=b"", stderr=b""),
         )
+
+    async def export_results(self, output):
+        output.mkdir(parents=True, exist_ok=True)
 
 
 def make_plan(**overrides):
@@ -120,3 +132,40 @@ def test_patch_tools_reject_undeclared_commands_and_apply_authorized_patch():
     )
     result = invoke(patch_tool, {"path": "package.json", "patch": patch})
     assert "error" in result or result.get("applied") == "package.json"
+
+
+def test_demo_model_drives_the_real_patch_agent_loop():
+    async def run():
+        workspace = FakeWorkspace(
+            {"package.json": '{"dependencies":{"aegis-demo-package":"1.0.0"}}'}
+        )
+        result = await patch_remediation(
+            workspace,
+            demo_plan(),
+            demo_packet(),
+            model=DemoPatchModel(),
+            demonstration=True,
+        )
+        return result, workspace
+
+    result, workspace = asyncio.run(run())
+    assert result.status == "completed"
+    assert result.demonstration is True
+    assert result.modified_files == ["package.json"]
+    assert b"1.0.1" in workspace.files["package.json"]
+
+
+def test_patch_service_blocks_incomplete_plans():
+    async def run():
+        workspace = FakeWorkspace({"package.json": '{"lodash":"4.17.20"}'})
+        return await patch_remediation(
+            workspace,
+            make_plan(status="needs_context", missing_context=["Missing caller evidence"]),
+            demo_packet(),
+            model=DemoPatchModel(),
+        )
+
+    result = asyncio.run(run())
+    assert result.status == "needs_context"
+    assert result.human_intervention_required is True
+    assert "Only a ready RemediationPlan can be executed" in result.errors

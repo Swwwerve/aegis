@@ -103,6 +103,8 @@ class PatchResult(BaseModel):
     further_testing_required: bool = True
     human_intervention_required: bool = False
     plan_references: list[str] = Field(default_factory=list, max_length=40)
+    demonstration: bool = False
+    demonstration_label: str | None = None
 
 
 def incomplete_plan(cve_id: str, status: str, message: str) -> RemediationPlan:

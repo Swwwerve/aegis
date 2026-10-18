@@ -35,12 +35,30 @@ cross-origin deployments must configure their own backend CORS policy. These
 are public connection settings. Keep `OPENAI_API_KEY` in the backend environment,
 never in a `VITE_` variable. Both API and UI bind to loopback in this setup.
 
+For a safe local Patch Agent demonstration, start the backend with
+`AEGIS_ENABLE_PATCH_DEMO=true`. The workspace page will show a clearly labeled
+development demonstration that creates a disposable local Git repository,
+executes a supplied synthetic plan in Docker, streams live tool events, and
+deletes the fixture after artifact export. It does not use the configured
+repository and is disabled by default.
+
+The production Patch Agent button is shown only after context investigation
+returns `completed` and remediation planning returns a `ready` plan. A
+`needs_context` plan is intentionally blocked from patch execution; resolve the
+displayed evidence requests and create the plan again. Context search does not
+require ripgrep: if `rg` is absent from the backend `PATH`, Aegis records a
+diagnostic and uses a bounded Python fallback.
+
+The host backend needs network access for GitHub intake, advisory feeds, and
+OpenAI model calls. The Docker sandbox remains network-disabled by design and
+uses its local toolchain/cache for dependency resolution and patch validation.
+
 ## Connected workflow
 
 1. Enter a public GitHub URL or choose NodeGoat, PyGoat, or WebGoat. Click Analyze.
    Already registered repositories reuse their saved clones; this does not fetch
    newer remote commits. Repositories are also listed in the sidebar's repository view.
-2. Follow real stage events: inventory, optional offline dependency resolution,
+2. Follow real stage events: inventory, optional offline dependency-graph resolution,
    optional model interpretation, OSV discovery, CVSS/EPSS/KEV enrichment,
    static usage inspection, priority scoring, and persistence.
 3. Inspect languages, package managers, manifests, projects, important directories,
@@ -55,7 +73,8 @@ never in a `VITE_` variable. Both API and UI bind to loopback in this setup.
 
 Model assistance is on by default and requires the host's `OPENAI_API_KEY`.
 Without a key the evidence scan continues and model status is unavailable.
-Optional sandbox resolution requires Docker and the configured polyglot image.
+Optional dependency-graph resolution requires Docker and the configured
+polyglot image.
 Static package calls are not measured runtime calls or confirmed vulnerable-function
 execution. Unavailable evidence and incomplete coverage stay explicit in the UI.
 

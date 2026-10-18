@@ -27,6 +27,7 @@ async def patch_remediation(
     model: str | Model = "gpt-5.4",
     progress=None,
     max_turns: int = 16,
+    demonstration: bool = False,
 ) -> PatchResult:
     run_id = str(uuid4())
     remediation_id = f"{plan.cve_id}:{run_id}"
@@ -40,6 +41,10 @@ async def patch_remediation(
             *[reference.advisory_id for reference in plan.advisory_references],
             *[reference.name for reference in plan.skill_references],
         ],
+        demonstration=demonstration,
+        demonstration_label=(
+            "Sandbox demonstration; disposable fixture only" if demonstration else None
+        ),
     )
     if plan.status != "ready":
         base.status = "needs_context"
@@ -60,7 +65,13 @@ async def patch_remediation(
     client = None
     try:
         skills = RemediationSkills(packet, progress=progress)
-        tools = PatchTools(workspace, plan)
+        tools = PatchTools(
+            workspace,
+            plan,
+            progress=progress,
+            run_id=run_id,
+            demonstration=demonstration,
+        )
         await emit(progress, "patch_agent", "running", "Starting sandbox patch execution", run_id=run_id)
         if isinstance(model, str):
             client = AsyncOpenAI(api_key=settings.openai_api_key.get_secret_value())

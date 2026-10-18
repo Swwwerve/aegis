@@ -123,14 +123,14 @@ class CodeSearch:
         }
 
     def search_code(self, query: str, *, candidates: list[str] | None = None) -> dict:
-        """Literal ripgrep search with bounded matches and no repository configuration."""
+        """Literal bounded search, using ripgrep when available."""
         if not query.strip() or len(query) > 300 or "\n" in query or "\0" in query:
             raise RetrievalError(
                 "Use a nonempty single-line query of at most 300 characters"
             )
-        if not self.rg:
-            raise RetrievalError("ripgrep (rg) is required but was not found on PATH")
         paths = sorted(self.files if candidates is None else candidates)
+        if not self.rg:
+            return self._python_search(query, paths)
         matches, diagnostics = [], list(self.warnings)
         deadline = time.monotonic() + self.timeout
         for offset in range(0, len(paths), 32):
@@ -216,6 +216,36 @@ class CodeSearch:
             "truncated": bool(diagnostics),
             "warnings": diagnostics,
         }
+
+    def _python_search(self, query: str, paths: list[str]) -> dict:
+        """Use a bounded literal fallback when ripgrep is unavailable."""
+        matches, diagnostics = [], [
+            *self.warnings,
+            "ripgrep (rg) was not found on PATH; used the built-in Python search fallback",
+        ]
+        deadline = time.monotonic() + self.timeout
+        for path in paths:
+            if time.monotonic() >= deadline:
+                raise RetrievalError("Repository search deadline exceeded")
+            try:
+                content = self._bytes(path).decode("utf-8-sig")
+            except (OSError, UnicodeDecodeError, RetrievalError):
+                diagnostics.append(f"Skipped unavailable/unsafe file: {path}")
+                continue
+            for line_number, line in enumerate(content.splitlines(), 1):
+                if query not in line:
+                    continue
+                snippet = self.read_file(path, line_number, line_number)
+                snippet["truncated"] |= len(snippet["content"]) > 500
+                snippet["content"] = snippet["content"][:500]
+                matches.append(snippet)
+                if len(matches) > self.max_matches:
+                    return {
+                        "matches": matches[: self.max_matches],
+                        "truncated": True,
+                        "warnings": diagnostics,
+                    }
+        return {"matches": matches, "truncated": bool(diagnostics), "warnings": diagnostics}
 
     def find_symbol(self, name: str) -> dict:
         """Find actual declarations, including enclosing symbol/import coordinates."""

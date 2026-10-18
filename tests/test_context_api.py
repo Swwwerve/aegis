@@ -15,6 +15,7 @@ from aegis.backend.api.remediation import (
 from aegis.backend.context.context_planner import ContextPacket
 from aegis.backend.db.models import ScanRun
 from aegis.backend.main import app
+from aegis.backend.schemas.remediation import RemediationPlan
 
 CVE = "CVE-2023-45803"
 
@@ -126,6 +127,45 @@ def test_context_failure_is_sanitized(api):  # noqa: F811
     )
     assert [kind for kind, _ in frames(response)] == ["error", "end"]
     assert "secret provider body" not in response.text
+
+
+def test_patch_endpoint_rejects_plan_context_cve_mismatch(api):  # noqa: F811
+    client, _, _ = api
+    scan_id = save_scan(client)
+    plan = RemediationPlan(
+        cve_id=CVE,
+        status="needs_context",
+        summary="Incomplete plan",
+        skills_used=[],
+        steps=[],
+        version_changes=[],
+        validation=[],
+        risks=[],
+        missing_context=["Missing evidence"],
+    ).model_dump(mode="json")
+    context = ContextPacket(
+        cve_id="CVE-2024-0001",
+        status="partial",
+        investigation_status="needs_context",
+    ).model_dump(mode="json")
+    response = client.post(
+        "/api/remediation/patch/stream",
+        json={
+            "scan_id": scan_id,
+            "cve_id": CVE,
+            "plan": plan,
+            "context": context,
+        },
+    )
+    assert response.status_code == 422
+    assert "do not match" in response.json()["detail"]
+
+
+def test_patch_demo_status_is_explicitly_labeled(api):
+    client, _, _ = api
+    response = client.get("/api/remediation/demo/status")
+    assert response.status_code == 200
+    assert response.json()["label"] == "Sandbox demonstration; disposable fixture only"
 
 
 def test_disconnect_cancels_context_investigation(api):  # noqa: F811

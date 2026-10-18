@@ -237,6 +237,13 @@ export function ContextView({
           </p>
           <StateBadge status={plan.status} />
           <p className="text-sm">{plan.summary}</p>
+          {plan.status !== "ready" && (
+            <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900">
+              The Patch Agent is unavailable for this plan until the status is
+              ready. Resolve the listed context or evidence gaps, then continue
+              the investigation and create a new plan.
+            </p>
+          )}
           <p className="text-xs">
             Skills used: {plan.skills_used.join(", ") || "None"}
           </p>

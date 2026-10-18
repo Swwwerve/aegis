@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/tooltip";
 import { AnalysisView, Empty, StateBadge } from "@/components/analysis-view";
 import { ResultsView } from "@/components/results-view";
+import { PatchDemoView } from "@/components/patch-demo-view";
 import {
   ApiError,
   canonicalUrl,
@@ -458,6 +459,7 @@ export default function App() {
             )}
             {view === "workspace" ? (
               <>
+                <PatchDemoView />
                 {!hasRun && (
                   <section className="relative flex min-h-[206px] items-center justify-between overflow-hidden pb-4">
                     <div className="relative z-10 max-w-xl">
@@ -644,10 +646,10 @@ export default function App() {
                                 htmlFor="resolution-option"
                                 className="cursor-pointer text-xs font-medium"
                               >
-                                Sandbox dependency resolution
+                                Resolve dependency graph
                               </label>
                               <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                                Optional offline resolution in Docker. Uncached
+                                Optional offline dependency graph resolution in Docker. Uncached
                                 dependencies may remain unresolved.
                               </p>
                             </div>

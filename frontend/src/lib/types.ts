@@ -248,6 +248,12 @@ export interface PatchResult {
   further_testing_required: boolean;
   human_intervention_required: boolean;
   plan_references: string[];
+  demonstration?: boolean;
+  demonstration_label?: string | null;
+}
+export interface PatchDemoStatus {
+  enabled: boolean;
+  label: string;
 }
 export interface Activity extends ProgressEvent {
   time: string;
@@ -255,7 +261,11 @@ export interface Activity extends ProgressEvent {
 export const stages = [
   { id: "intake", title: "Repository", detail: "Validate and clone" },
   { id: "inventory", title: "Understand", detail: "Languages & manifests" },
-  { id: "resolution", title: "Resolve", detail: "Optional sandbox" },
+  {
+    id: "resolution",
+    title: "Resolve dependencies",
+    detail: "Optional offline graph",
+  },
   {
     id: "interpretation",
     title: "Interpret",
