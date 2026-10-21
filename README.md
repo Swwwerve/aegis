@@ -1,524 +1,202 @@
-# Aegis
+﻿# Aegis
 
-Open source vulnerability remediation service.
+Aegis is an open source vulnerability remediation service. It inspects GitHub
+repositories, finds vulnerable dependencies, ranks findings with supporting
+evidence, and helps investigate, plan, and generate fixes in a Docker sandbox.
+The app uses a FastAPI backend, a React/TypeScript frontend, and SQLite storage.
 
-The `aegis/backend` package contains the FastAPI application and production
-logic. Benchmark material lives under `evals`, tests under `tests`, and
-deployment/UI placeholders under `docker` and `frontend`.
+## What has been achieved
 
-## Directory layout
+- **Repository intake:** clone public GitHub repositories and reuse saved clones.
+- **Repository understanding:** inventory Python, Node.js, and Java projects,
+  manifests, lockfiles, dependency versions, and proposed build/test commands.
+- **Vulnerability scanning:** query OSV for exact dependency versions and preserve
+  advisory IDs, affected ranges, fixes, references, and coverage gaps.
+- **Prioritization:** combine CVSS, EPSS, CISA KEV, and static source usage into
+  an application risk score, with optional model reasoning.
+- **Connected workspace:** stream progress, inspect findings and execution logs,
+  export JSON, and reopen saved scans with their evidence.
+- **Remediation:** investigate CVE source context, ask for missing information,
+  create skill-guided plans, and run the Patch Agent inside restricted Docker.
+- **Patch verification:** export patch artifacts and display declared validation
+  commands, output, and results. A disposable demo exercises the patch workflow
+  without an OpenAI key.
+- **Automated coverage:** backend tests, frontend unit tests, and mocked browser
+  tests cover scanning, streaming, context, planning, and patch behavior.
 
-```text
-Aegis/
-  aegis/backend/          Python application package
-    core/config.py       Environment-backed settings
-    db/models.py         Database models
-    api/                 HTTP endpoints
-    agents/              Agent definitions
-    analysis/            Repository inventory and dependency parsing
-    sandbox/             Restricted Docker execution
-  docker/                Dockerfiles, including the sandbox image
-  frontend/              Reserved for the web UI
-  tests/                 Automated tests
-  scripts/               Developer utilities and smoke tests
-  evals/                 Reserved for evaluation benchmarks
-  workspaces/            Generated repository clones (ignored by Git)
-  sandbox-smoke-results/ Generated test artifacts (ignored by Git)
-  pyproject.toml         Python dependencies and packaging
-```
+## 1. Install prerequisites
 
-Keep Docker build files, frontend code, tests, and scripts at the project root.
-Runtime data belongs outside the Python package. The database (`aegis.db`),
-local environment (`.env`), and virtual environment (`.venv/`) are ignored by Git.
+Use Python 3.11+, Node.js with npm, and Git. Docker Desktop with Linux containers
+is needed for dependency resolution and patch execution. An `OPENAI_API_KEY` is
+needed for model-assisted analysis and production remediation, but basic scans
+and the Patch Agent demo can run without one.
 
-## Setup
+The commands below use Windows PowerShell from the repository root.
+
+## 2. Install the application
+
+Create a Python environment and install backend dependencies:
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-# Optional: create .env with OPENAI_API_KEY=... for model-assisted analysis.
-uvicorn aegis.backend.main:app --reload
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
-Run tests with `pytest`.
-
-## Frontend: the connected repository workspace
-
-The `frontend/` directory now contains a React/TypeScript application with
-Tailwind CSS and official shadcn/ui components. It connects repository intake,
-inventory, optional sandbox/model analysis, vulnerability discovery, live
-enrichment, source usage, prioritization, and scan history. Progress comes from
-the backend's new `POST /scans/stream` endpoint, including intermediate inventory
-output and the final persisted result. Existing scan endpoints remain available.
-
-Build it once, then serve the application and API together:
+Install frontend dependencies and build the browser app:
 
 ```powershell
-cd frontend
+Set-Location frontend
 npm ci
 npm run build
-cd ..
-.\.venv\Scripts\python.exe -m uvicorn aegis.backend.main:app --host 127.0.0.1 --port 8000
+Set-Location ..
 ```
 
-Open **http://127.0.0.1:8000**. For hot reload, run `npm run dev` in `frontend/`
-while the backend runs on port 8000; open **http://127.0.0.1:5173**. Vite proxies
-the same-origin API requests and streams. Restart an already running backend
-after applying these changes. See [frontend/README.md](frontend/README.md) for
-configuration, exact workflow behavior, automated tests and the live browser smoke.
-See [END_TO_END_TESTING.md](END_TO_END_TESTING.md) for the complete local
-backend, frontend, scan, Docker sandbox, and Patch Agent test procedure.
+For model features, add this line to a root `.env` file:
 
-To exercise the Patch Agent without using a real repository, enable the explicitly
-development-only sandbox demonstration before starting the backend:
-
-```powershell
-$env:AEGIS_ENABLE_PATCH_DEMO="true"
-.\.venv\Scripts\python.exe -m uvicorn aegis.backend.main:app --host 127.0.0.1 --port 8000 --reload
+```dotenv
+OPENAI_API_KEY=your-key-here
 ```
 
-The workspace page then shows **Run Patch Agent demo**. It creates a temporary
-committed Git fixture, applies a supplied synthetic npm remediation plan inside
-Docker, streams tool activity to the browser, exports the sandbox artifact, and
-deletes the fixture. It never reads or modifies the configured repository.
+Keep the key on the backend; never put it in a `VITE_` variable. Model calls use
+API credits. SQLite tables and the workspace directory are created as needed.
 
-Choose a real example or submit a public GitHub URL. Existing repositories reuse
-their saved clones. Inspect each stage, open finding evidence, review coverage
-gaps, filter priorities, export JSON and reopen saved scans. New scans also retain
-their full repository inventory so history preserves the connected evidence.
+## 3. Prepare Docker when needed
 
-## Step 5: live, model-assisted vulnerability prioritization
-
-`POST /scans` now enriches findings with CVSS base scores (v2/v3/v4 vectors),
-FIRST EPSS probability/percentile/date, CISA KEV catalog matches, advisory source
-links/dates/ranges, confirmed fixes, and static package usage evidence. Findings
-are returned in descending `priority.score` order and saved with their evidence;
-historical scan results retain their original snapshots.
-
-`use_model: true` requests a non-deterministic OpenAI assessment as well as repo
-interpretation. Configure `OPENAI_API_KEY` in the host environment or `.env`.
-The model receives bounded advisory facts and source locations, proposes an
-adjustment of at most 10 points in either direction, and supplies a rationale
-with evidence fields. It cannot overwrite CVSS, EPSS, KEV, fixes, or affected
-status. Model failures retain the evidence score and report their status.
-`use_model: false` still fetches live feeds and computes the evidence baseline.
-No EPSS/CISA credentials are needed; CISA's official GitHub mirror is the fallback.
-
-The application ranking score is 0-100: `5 * CVSS base`, plus
-`30 * sqrt(EPSS probability)`, plus up to 10 points for static package call sites
-(`3 * log2(1 + calls)`), plus 10 for known runtime scopes or 5 for dev/unknown
-scopes. Missing CVSS and EPSS provisionally contribute 25 and 5 respectively.
-A KEV match always scores at least 90 and a model cannot downgrade it.
-Priority levels are critical >=90, high >=70, medium >=40, and low <40.
-This is a configurable-in-code ranking heuristic, not an exploit probability,
-CVSS severity classification, or an industry standard. Fix availability is
-reported for remediation and does not lower risk. `kev: false` means absence
-from the successfully fetched catalog; a feed failure produces `kev: null`.
-
-Inspect `report.prioritization_status`, `priority.missing_evidence`, provider
-statuses/timestamps in `enrichment`, and `priority.model_status`. Scan coverage
-status and prioritization status are independent. EPSS readings preserve every
-available CVE; `epss_probability` is their maximum, with missing aliases flagged.
-EPSS readings older than 7 days are retained as evidence and excluded from scoring.
-A KEV catalog older than 14 days still establishes positive matches, but its
-non-matches become unknown. Both conditions are flagged in provider statuses.
-The newest available CVSS generation is preferred, then the highest base score
-within that generation. Original vectors and advisory ranges remain available.
-CISA catalog due dates are catalog evidence, not application-specific deadlines.
-
-`usage.static_call_count` counts source call sites for the affected package.
-Python uses AST import/alias analysis; Node uses import/require lexical heuristics.
-The bounded scan excludes generated/vendor/cache directories and symlinks.
-Evidence includes source path, line, symbol, method, limits, and scan status.
-Python advisory function names, when supplied, allow exact symbol matching in
-`affected_function_call_count`. Maven package-to-namespace mapping is currently
-unsupported, so Java call evidence is explicitly unknown. Dynamic dispatch,
-wrappers, local module shadowing and transitive usage can leave evidence incomplete.
-No detected call sites proves neither safety nor non-reachability.
-`usage.runtime_call_count` remains null: measuring how often a vulnerable path
-actually executes requires runtime instrumentation, which this step does not add.
-
-Run regression tests and disposable live checks (no fixture code is executed):
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe -m scripts.smoke_live_scan --prioritize
-# Also exercise OpenAI repo interpretation and priority assessment:
-.\.venv\Scripts\python.exe -m scripts.smoke_live_scan --model
-```
-
-The smoke check uses temporary Git/SQLite fixtures and saves its complete report
-under ignored `sandbox-smoke-results/`. The model check uses your API key.
-
-## Step 4: live dependency vulnerability scanning
-
-Start the API and open `http://127.0.0.1:8000/docs`. Submit a repository through
-`POST /repositories`, or reuse its existing ID from `GET /repositories`.
-Then call `POST /scans`:
-
-```json
-{
-  "repository_id": 1,
-  "use_model": true,
-  "resolve_dependencies": false
-}
-```
-
-`use_model` enables Step 3's non-deterministic README/CI interpretation and
-Step 5's model-assisted priority assessment when an OpenAI key is available.
-Advisory discovery uses live OSV data and can change
-between scans. Vulnerability identities, affected status, and fix versions are
-grounded in advisory evidence. Models do not populate vulnerability fields or
-choose dependency versions; their separate repo interpretation is retained in
-`report.analysis_summary` with an inference status.
-No OSV API key or scanner binary is needed. OSV includes GitHub Advisory Database
-records, so a separate GitHub token/provider is unnecessary for these advisories.
-
-The response contains a persisted scan ID/status and `report.vulnerabilities`:
-
-```json
-{
-  "package": "urllib3",
-  "installed_version": "1.26.4",
-  "cve": "CVE-2023-45803",
-  "affected": true,
-  "fixed_version": "1.26.18"
-}
-```
-
-Each finding also preserves ecosystem, all OSV IDs/aliases/CVEs, reported fix
-versions, references, severity vectors, manifests, scopes, conditional markers,
-and version provenance. Advisories without a CVE use `cve: null` and retain their
-advisory ID. Unpatched advisories or incomparable version schemes use
-`fixed_version: null`; Git commit hashes and `last_affected` boundaries are never
-presented as patched releases. A suggested fix addresses that advisory only,
-not every vulnerability in the package, and may still require compatibility testing.
-
-The scanner maps Python to PyPI, Node to npm, and Java to Maven. It queries exact
-lock/resolved versions and exact manifest pins, including discovered transitive,
-development and optional dependencies. `installed_version` names that concrete
-version; a pin/lockfile does not prove the package is installed. `version_source`,
-markers and manifests explain the evidence. Constraints, BOM/catalog policy entries,
-unresolved ranges and local/git dependencies are not guessed as installed packages.
-Unresolved dependencies remain in `report.unscanned_dependencies`.
-
-Set `resolve_dependencies: true` to run the optional dependency-graph
-resolution stage in the offline Docker sandbox before interpretation and
-vulnerability discovery.
-This requires `aegis-sandbox:polyglot` or a prepared image selected through
-`AEGIS_ANALYSIS_SANDBOX_IMAGE`. The host then performs OSV requests; repository
-code continues to run only inside network-disabled Docker. Only package identifiers
-and versions are sent to OSV. Model interpretation has Step 3's separate context rules.
-
-`GET /scans/{id}` returns a saved result. `GET /scans?repository_id=1` returns
-history, newest first (`limit` 1..100 and nonnegative `offset` are supported).
-The POST runs synchronously and returns 201 for the created scan resource;
-inspect its status even when the HTTP request succeeds. `completed` means all
-identified exact versions were queried without recorded coverage/provider gaps,
-`partial` retains available findings with unresolved coverage/errors, and `failed`
-means the scan could not produce a usable result. No result claims an exhaustive
-source-code audit, reachability analysis, or detection of undisclosed vulnerabilities.
-
-Scan history is stored in `scan_runs.result`; deduplicated findings are stored in
-the new `vulnerability_findings` table. Normalization merges transitive OSV aliases
-within each ecosystem/package/version, preserving separate versions and packages.
-Withdrawn advisories are ignored; related IDs are not treated as aliases. Startup
-creates the new table alongside existing tables without deleting the database or
-changing existing scan/repository columns. Rescans create new historical runs.
-
-OSV requests use bounded batches, per-package pagination, limited concurrent
-advisory hydration, timeouts/retries, response-size budgets, and explicit errors.
-A failed lookup or unavailable exact inventory is never presented as a clean scan.
-
-Run the offline regression suite and a live smoke test:
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_vulnerabilities.py -q
-.\.venv\Scripts\python.exe -m scripts.smoke_live_scan
-```
-
-The live test uses disposable Git/SQLite fixtures, checks vulnerable Python/npm/Maven
-packages against OSV, verifies persistence/deduplication and the urllib3 example,
-and writes the full JSON report under ignored `sandbox-smoke-results/`. It does not
-change the application's registered repositories and does not make OpenAI calls.
-Live advisory data can change; offline tests use controlled OSV responses.
-
-References: [OSV API](https://google.github.io/osv.dev/api/),
-[batch pagination](https://google.github.io/osv.dev/post-v1-querybatch/),
-[OSV alias/range schema](https://ossf.github.io/osv-schema/),
-[OSV data sources](https://google.github.io/osv.dev/data/).
-
-## Step 3: repository understanding
-
-Analyze an existing clone without executing any repository code:
-
-```powershell
-.\.venv\Scripts\python.exe -m aegis.backend.analysis.repo_analyzer workspaces/CLONE_ID
-```
-
-Add `--model` to interpret README, CI, and manifest evidence using OpenAI
-(requires `OPENAI_API_KEY` in `.env` and makes paid API calls). Without a key,
-or if inference fails, the static inventory is retained with an explicit status.
-Only bounded excerpts of inventoried manifests, README and CI files are sent;
-`.env`, source files, and generated artifacts are excluded from model context.
-Repository text is treated as untrusted data.
-
-For an ingested repository, use `POST /repositories/{id}/analysis` in `/docs`:
-
-```json
-{"use_model": false}
-```
-
-Set `use_model` to `true` for model interpretation. Analysis is computed on
-demand from the existing clone; it does not refresh the clone or change the DB.
-Reports contain source-file language counts, project roots, manifests, lockfiles,
-declared and supported resolved dependencies, dependency scopes and markers,
-package-manager conflicts, runtime constraints, important directories, CI/docs,
-container files, and proposed install/build/test/lint/typecheck commands. Commands
-include their working directory, source evidence, origin and confidence.
-Nested projects are analyzed independently; Node packages inherit an ancestor's
-package manager when they do not declare one locally.
-
-Python supports pyproject (PEP 621, dependency groups, Poetry), requirements and
-constraints includes, Pipfile, setup.cfg, uv/Poetry/Pipenv locks. Node supports
-package.json, npm/pnpm/Yarn Classic/Yarn Berry/Bun text lock inventories. Java
-supports Maven dependencies/properties/scopes, Gradle coordinates, Gradle lockfiles,
-and version catalogs. Legacy binary Bun lockfiles are decoded inside Docker.
-
-Dynamic Python metadata, Maven parent/BOM inheritance, computed Gradle dependencies,
-and transitive graphs can be evaluated in the offline polyglot sandbox:
+Start Docker Desktop, then build the image containing Python, Node.js, Java,
+and offline dependency caches:
 
 ```powershell
 docker build -f docker/Dockerfile.polyglot -t aegis-sandbox:polyglot .
-.\.venv\Scripts\python.exe -m aegis.backend.analysis.repo_analyzer workspaces/CLONE_ID --resolve
+docker image inspect aegis-sandbox:polyglot
 ```
 
-Or request `{"use_model": false, "resolve_dependencies": true}` at the analysis
-endpoint. Add `--model` or `use_model: true` to interpret the resolved report.
-`resolutions` records each method's status, exact dependencies, dependency edges,
-and diagnostics. Python uses build backend metadata and installed distribution
-metadata; Maven uses its dependency-tree plugin, including parent/BOM resolution;
-Gradle evaluates the build and inspects all resolvable configurations, including
-computed values and catalogs; npm/pnpm/Yarn/Bun install offline with lifecycle
-scripts disabled and inspect installed packages. Yarn Berry uses its Plug'n'Play
-API when appropriate. Lockfile inventories describe the locked packages,
-but do not imply those packages are installed. Analysis never proves tests pass.
+Use this image for dependency resolution and the npm Patch Agent demo.
+`Dockerfile.sandbox` is the smaller Python image and does not provide the full
+polyglot toolchain. Set `AEGIS_ANALYSIS_SANDBOX_IMAGE` to use a prepared custom
+image for dependency analysis.
 
-To verify selected commands, use `SandboxExecutor` inside a Step 2 sandbox:
+The host uses the network for cloning, advisory feeds, and model calls. Repository
+execution stays in a network-disabled, nonroot, resource-limited sandbox. Offline
+resolution needs cached packages; missing packages produce explicit coverage gaps.
 
-```python
-from aegis.backend.analysis.repo_analyzer import analyze_repository
-from aegis.backend.sandbox.docker_runner import create_sandbox
-from aegis.backend.sandbox.executor import SandboxExecutor
-from aegis.backend.sandbox.policies import SandboxPolicy
+## 4. Start the app
 
-report = analyze_repository(repo_path)
-async with await create_sandbox(repo_path, policy=SandboxPolicy.polyglot()) as box:
-    executor = SandboxExecutor(box)
-    for project in report.projects:
-        for command in project.commands:
-            if command.kind == "test":
-                result = await executor.execute(command)
-                print(result.model_dump())
-```
-
-Run this snippet in an async function, with `repo_path` set to a registered clone.
-Execution is explicit and confined to Docker, including a resolved-path check on
-the working directory. Results distinguish passing, failing, missing tools,
-timeouts, and execution errors. Network-requiring commands are skipped. Offline
-install commands can execute explicitly; Node resolvers prepare dependencies
-automatically using private caches with lifecycle scripts disabled. Project test scripts,
-wrappers, Python backends and Gradle configuration execute only inside Docker.
-
-The built `aegis-sandbox:polyglot` image includes Python 3.12, Node 22, npm,
-pnpm 10, Yarn Classic 1 and Berry 4, Bun 1, Temurin JDK 21, Maven 3.9 and Gradle 8. Upstream
-Node/Maven/Gradle/Bun images are pinned by digest in `docker/Dockerfile.polyglot`.
-The runtime policy increases memory to 2 GiB and writable workspace space to
-1 GiB for Java while retaining nonroot execution, no network, no mounts or host
-secrets, a read-only image, dropped capabilities and time/resource limits.
-
-The image seeds public Maven plugins, JUnit/Hamcrest and small Node fixture caches
-using only checked-in trusted fixtures during image construction. Every sandbox
-gets a private writable copy; caches are never shared across runs. An uncached
-artifact cannot be downloaded with network disabled: resolution reports `partial`
-or `unavailable`, rather than claiming an empty successful graph. Populate
-project-specific caches in a derived image when needed, for example:
-
-```dockerfile
-FROM aegis-sandbox:polyglot
-USER root
-COPY trusted-caches/maven/ /opt/aegis-cache/maven/
-COPY trusted-caches/npm/ /opt/aegis-cache/npm/
-COPY trusted-caches/pnpm/ /opt/aegis-cache/pnpm/
-COPY trusted-caches/yarn/ /opt/aegis-cache/yarn/
-COPY trusted-caches/yarn1/ /opt/aegis-cache/yarn1/
-COPY trusted-caches/bun/ /opt/aegis-cache/bun/
-COPY trusted-caches/gradle/ /opt/aegis-cache/gradle/
-USER 10001:10001
-```
-
-Use `dataclasses.replace(SandboxPolicy.polyglot(), image="your-prepared-image")`
-with `create_sandbox` or `resolve_repository_analysis` to select that image.
-For API and CLI resolution, set `AEGIS_ANALYSIS_SANDBOX_IMAGE=your-prepared-image`
-in the host environment or `.env`, then restart the backend.
-Use caches populated by the matching toolchain from a trusted build environment;
-do not copy credential-bearing settings or enable network for repository code.
-Different required Node/JDK/Gradle versions need matching derived toolchains.
-pnpm caches must include registry metadata as well as the content store; Yarn
-Berry caches must include the global metadata/cache directory. Required Python
-build backends must also be installed in the prepared image. The base image
-includes setuptools and wheel; arbitrary backend/plugin dependencies are reported
-as unavailable until provisioned. The offline boundary is preserved during all
-repository inspection and test execution.
-
-Run the Step 3 tests with:
+Run the backend and leave the terminal open:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_analysis.py tests/test_resolution.py tests/test_repos.py tests/test_sandbox.py -q
+.\.venv\Scripts\python.exe -m uvicorn aegis.backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-## Step 2: restricted remediation sandbox
+Open **http://127.0.0.1:8000** for the built frontend, or
+**http://127.0.0.1:8000/docs** to explore and test the API.
 
-Start Docker Desktop and build the local test image:
+For frontend hot reload, keep the backend running and open a second terminal:
 
 ```powershell
-docker build -f docker/Dockerfile.sandbox -t aegis-sandbox:py312 .
-python -m pytest tests/test_sandbox.py -q
+Set-Location frontend
+npm run dev
 ```
 
-To run a real OpenAI agent after putting `OPENAI_API_KEY` in Aegis's `.env`:
+Open **http://127.0.0.1:5173**. Vite forwards API requests to port 8000.
+
+## 5. Run a scan and review a fix
+
+1. Enter a public GitHub URL or choose an example, then start analysis. Saved
+   repositories reuse their existing clone; they do not automatically fetch
+   newer commits.
+2. Enable model assistance if a key is configured. Enable **Resolve dependency
+   graph** only when Docker and the polyglot image are ready.
+3. Follow inventory, vulnerability discovery, enrichment, usage inspection,
+   prioritization, and saving in the live activity panel.
+4. Open a finding to inspect affected versions, advisory references, confirmed
+   fixes, priority evidence, source call sites, and coverage notes.
+5. Export the report or reopen it from scan history to inspect saved evidence.
+6. For a CVE finding, select **Investigate context**, answer any missing-context
+   questions, then select **Create remediation plan** and review the proposal.
+7. Once investigation is `completed` and the plan is `ready`, start the Patch
+   Agent. Review the exported patch and **Patch verification → Validation
+   results**, including command output and any failed or skipped checks.
+
+A generated patch is a review artifact. `further_testing_required: true` means
+additional testing is required; a dependency version change alone does not prove
+that a vulnerability is fixed. Repository modifications happen inside Docker.
+
+## 6. Run automated tests
+
+Run backend tests from the repository root:
 
 ```powershell
-python -m scripts.smoke_live_sandbox
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-This creates a disposable Git repo with one failing test, asks the agent to fix it
-inside Docker, reruns pytest, and saves the patch, checks, and token counts under
-`sandbox-smoke-results/`. The key stays in the host process.
+Run frontend unit tests, check the production build, and run browser tests:
 
-`create_sandbox()` accepts the `local_path` saved for a Step 1 repository. It copies
-that clone into `/workspace/repo` in a fresh Docker container. The host clone is not
-mounted and is not modified. Use one `SandboxWorkspace` across the agent and all
-check iterations. Exiting its async context removes the container. Save a snapshot
-before exit if the run will be resumed later.
-
-```python
-import asyncio
-from pathlib import Path
-from aegis.backend.sandbox.docker_runner import create_sandbox
-
-async def main():
-    repo = Path("workspaces/CLONE_ID")  # Repository.local_path from Step 1
-    async with await create_sandbox(repo) as box:
-        print((await box.exec("ls", "/workspace/repo")).stdout.decode())
-        # Set OPENAI_API_KEY on the host to run the OpenAI agent; it is never
-        # forwarded into the container.
-        # Remediation planning uses plan_remediation(reviewed_packet).
-        # The planner has no execution or file-editing tools.
-        print(await box.run_checks({"tests": ["python", "-m", "pytest", "-q"]}, "results/checks"))
-        await box.export_results("results/export")
-
-asyncio.run(main())
+```powershell
+Set-Location frontend
+npm run test:unit
+npm run build
+npx playwright install chromium
+npm test
+Set-Location ..
 ```
 
-The image includes Python 3.12, Git, pytest, and Bandit. Checks can also run
-`bandit -r /workspace/repo`; internet based scanners cannot download data inside
-the network disabled container. The result export contains `patch.diff`, Git status,
-container output, and `workspace.tar`; declared check stdout, stderr, and exit codes
-are saved by `run_checks`. To resume changes, pass `snapshot="results/export/workspace.tar"`
-to `create_sandbox`. Keep exported results outside the source clone.
+Expect passing tests and a successful build. Playwright starts Vite automatically
+and uses mocked API responses for repeatable desktop/mobile checks. These tests
+are separate from live provider and Docker verification.
 
-The Agents SDK and OpenAI Python package are pinned together because their sandbox
-and usage interfaces change. Review `SecureDockerSandboxClient` before upgrading
-either dependency; it enforces container restrictions through an SDK creation hook.
+Check real advisory feeds and saved results without model calls:
 
-Containers run as UID 10001 with no network or published ports, a read only image,
-bounded writable tmpfs, CPU, memory and process limits, all Linux capabilities
-dropped, and no Docker socket or host secrets. The host process needs access to the
-Docker daemon. These restrictions limit untrusted code, but Docker is not a hardened
-multi tenant boundary; use a dedicated machine or VM for hostile repositories.
-
-### CVE context planning
-
-`context/context_planner.py` implements model-directed retrieval: the model chooses
-searches, symbols, line ranges, related tests, and the final snippet selection.
-`analysis/code_search.py` uses the `rg` executable on PATH and Tree-sitter grammars
-for Python, JavaScript, TypeScript/TSX, and Java. Install the project dependencies
-after updating; no repository code is executed by the retrieval tools.
-
-```python
-from aegis.backend.context.context_planner import plan_hybrid_context
-
-# report is the ScanReport from a saved scan, including Step 5 enrichment.
-packet = await plan_hybrid_context(clone_path, "CVE-2024-1234", report)
-print(packet.status, packet.missing_context)
+```powershell
+.\.venv\Scripts\python.exe -m scripts.smoke_live_scan --prioritize
 ```
 
-The six tools are `search_code`, `read_file`, `find_symbol`, `find_related_tests`,
-`get_dependency_info` (Step 3), and `get_advisory` (saved Step 5 evidence). Reads use
-inclusive, one-based line ranges. The final packet contains selected, hashed
-snippets with file/line coordinates and relevance reasons, plus only the target
-CVE's advisory and package facts. Limits bound tool calls, retrieval output,
-planning time, and final context size. No full repository dump or tool transcript
-is sent to the remediation agent. Unsupported grammars and incomplete retrievals
-remain explicit; model selection is not a proof of perfect relevance/completeness.
+To also check model interpretation and prioritization, run the same command with
+`--model` instead. These checks use temporary Git/SQLite fixtures and save reports
+under `sandbox-smoke-results/`. Live advisory results can change over time.
 
-`await SandboxExecutor(workspace).remediate_with_context(clone_path, cve_id, report)`
-returns `(packet, plan)`. It verifies selected snippets against the live
-sandbox before producing a skill-guided `RemediationPlan`. Partial,
-missing-key, unknown-CVE, failed, or stale context returns no agent result. A model
-call requires the configured `OPENAI_API_KEY`; offline tests inject a mock model.
+## 7. Test the Patch Agent demo
 
-The hybrid path runs a separate OpenAI Agents SDK context investigator with only
-`search_code`, `read_file`, and `find_symbol`. It checks ambiguity and whether each
-snippet is necessary for choosing or validating the fix, investigates gaps, and
-returns specific missing-context questions. Both passes share retrieval limits
-and one planning deadline. Overlapping source ranges are merged; operator answers
-are retained only as selected verbatim ranges. The remediation prompt excludes
-retrieval logs, risk scores, progress metrics, and investigation commentary.
-`plan_context` remains available for draft-only retrieval.
+Build the polyglot image first. Stop the backend, then restart it with the demo
+enabled in the same terminal:
 
-In the frontend, inspect a CVE finding and select **Investigate context** under
-**Fix context**. Live activity, selected snippets, unresolved questions, and context
-export appear there. Provide a **Missing context response** and select **Continue
-investigation** to run another bounded review with that clarification. Closing the
-finding or selecting **Stop investigation** cancels work. Each continuation is a
-fresh run; context packets can be exported but are not stored as additional scans.
-The streaming endpoint is `POST /remediation/context/stream` (also available under
-`/api`) with `scan_id`, `cve_id`, and optional `clarification` (up to 4,000 characters).
-
-Embeddings are not required for this version: exact API search, symbol parsing,
-and an independent model review provide source coordinates for every code snippet.
-Semantic retrieval can be added later if evaluated cases show lexical search is
-missing necessary evidence; similarity alone would not establish relevance.
-
-### Skill-guided remediation plans
-
-The remediation agent is a regular OpenAI SDK `Agent`, with **only** a trusted
-`load_skill` tool. It has no shell, filesystem, sandbox or execution capabilities.
-The planner produces proposed changes, confirmed version targets, evidence IDs,
-compatibility risks and future validation checks; it never edits files or runs
-commands. Existing sandbox execution/resolution APIs remain separate operations.
-
-Skills live under `aegis/backend/skills/`: vulnerability triage, Python, npm,
-Maven, Gradle, regression testing, security review, injection and deserialization.
-Only descriptions of evidence-eligible skills enter the initial prompt. The agent
-loads the instruction body for each necessary skill on demand; irrelevant skill
-loads are rejected and actual loaded skills are checked against the final plan.
-An unconfirmed version, unseen file, invented evidence ID or unsupported validation
-command marks the proposal as needing context rather than ready for review.
-
-```python
-from aegis.backend.services.remediation_service import plan_remediation
-plan = await plan_remediation(reviewed_packet)
+```powershell
+$env:AEGIS_ENABLE_PATCH_DEMO = "true"
+.\.venv\Scripts\python.exe -m uvicorn aegis.backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-After context investigation, **Create remediation plan** in the finding dialog
-streams skill-selection progress and displays the proposed steps and validation.
-**Export plan** downloads the proposal. `POST /remediation/plan/stream` accepts the
-same scan/CVE/clarification fields as the context endpoint, re-investigates current
-source context, and generates a plan. `SandboxExecutor.remediate_with_context` is
-a compatibility entry point returning `(packet, plan)`; it performs source
-freshness reads before planning but does not invoke execution capabilities.
+Open the app and select **Run Patch Agent demo**. It creates a temporary committed
+Git fixture, changes a synthetic npm dependency from `1.0.0` to `1.0.1` in Docker,
+executes a declared validation check, exports the diff, and deletes the fixture.
+It uses a deterministic model and leaves the configured repository untouched.
+
+Expect `status: completed`, `modified_files: ["package.json"]`,
+`demonstration: true`, validation output, and `further_testing_required: true`.
+This verifies the demo workflow, not a security fix for a real repository.
+
+## Current limits and troubleshooting
+
+- **Incomplete scans:** unresolved versions and provider errors remain visible.
+  `partial` is not a clean scan; inspect coverage and enrichment statuses.
+- **Usage evidence:** static call sites do not prove runtime reachability or
+  execution frequency. Java package-to-namespace usage mapping is unsupported.
+- **Risk scores:** the 0–100 priority score is an application heuristic, not an
+  exploit probability or CVSS severity classification.
+- **Cannot connect:** check that `/docs` responds on port 8000 before starting
+  Vite. Rebuild the frontend after UI changes when using port 8000.
+- **Docker failures:** check `docker version` and the image inspection command
+  above. Missing offline packages require a prepared image/cache.
+- **Patch unavailable:** configure the backend API key and resolve context gaps
+  until investigation is completed and the plan is ready.
+
+See [the end-to-end testing guide](END_TO_END_TESTING.md) for detailed procedures
+and [the frontend guide](frontend/README.md) for UI configuration and browser checks.
+
+## Project layout
+
+- `aegis/backend/` — API, analysis, vulnerability feeds, agents, skills, and sandbox.
+- `frontend/` — React workspace and browser tests.
+- `tests/` — backend regression tests.
+- `scripts/` — live smoke checks.
+- `docker/` — sandbox images and trusted cache fixtures.
+- `evals/` — reserved benchmark area.
+- `workspaces/`, `aegis.db`, `sandbox-smoke-results/` — generated local data.
